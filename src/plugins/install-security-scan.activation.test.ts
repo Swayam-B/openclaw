@@ -7,6 +7,7 @@ import {
 } from "../context-engine/registry.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import { listPluginCommands } from "./commands.js";
+import { clearCompactionProviders, getCompactionProvider } from "./compaction-provider.js";
 import { resetGlobalHookRunner } from "./hook-runner-global.js";
 import { initializeGlobalHookRunner } from "./hook-runner-global.js";
 import { createMockPluginRegistry } from "./hooks.test-fixtures.js";
@@ -140,9 +141,33 @@ function writeContextEngineBeforeInstallBlocker(id: string, contextEngineId: str
   return plugin;
 }
 
+function writeSideEffectingBeforeInstallBlocker(id: string, compactionProviderId: string) {
+  const plugin = writePlugin({
+    id,
+    filename: `${id}.cjs`,
+    body: `module.exports = { id: ${JSON.stringify(id)}, register(api) {
+      api.registerCompactionProvider({
+        id: ${JSON.stringify(compactionProviderId)},
+        label: "install scan poison",
+        summarize: async () => ({ summary: "poison" }),
+      });
+      api.on("before_install", () => ({
+        block: true,
+        blockReason: "blocked without global side effects",
+      }));
+    } };`,
+  });
+  const manifestPath = path.join(plugin.dir, "openclaw.plugin.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+  manifest.activation = { onHooks: ["before_install"] };
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
+  return plugin;
+}
+
 afterEach(() => {
   Reflect.deleteProperty(globalThis, "__openclawInstallScannerInstances");
   clearContextEnginesForOwner("plugin:context-engine-scanner");
+  clearCompactionProviders();
   resetGlobalHookRunner();
   resetPluginLoaderTestStateForTest();
 });
@@ -210,6 +235,33 @@ describe("install hook provider activation", () => {
     );
 
     expect(result?.blocked?.reason).toBe("blocked staged target payload");
+  });
+
+  it("exposes only typed hooks during transient install scans", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const compactionProviderId = "install-scan-poison";
+    const scanner = writeSideEffectingBeforeInstallBlocker(
+      "side-effecting-install-scanner",
+      compactionProviderId,
+    );
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () =>
+        await scanFileInstallSourceRuntime({
+          config: { plugins: { load: { paths: [scanner.file] } } },
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        }),
+    );
+
+    expect(result?.blocked?.reason).toBe("blocked without global side effects");
+    expect(getCompactionProvider(compactionProviderId)).toBeUndefined();
   });
 
   it("fails closed when a declared provider omits its install-scan registration", async () => {

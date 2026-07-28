@@ -365,6 +365,10 @@ export function createPluginApiFactory(
                 registerMemoryCorpusSupplement(record, supplement),
               registerMemoryEmbeddingProvider: (adapter) =>
                 registerMemoryEmbeddingProvider(record, adapter),
+            }
+          : {}),
+        ...(registrationCapabilities.typedHookHandlers
+          ? {
               on: (hookName, handler, opts) =>
                 registerTypedHook(record, hookName, handler, opts, params.hookPolicy),
             }
@@ -377,10 +381,15 @@ export function createPluginApiFactory(
               registerSessionCatalog: (provider) => registerSessionCatalog(record, provider),
             }
           : {}),
-        // Allow setup-only/setup-runtime paths to surface parse-time CLI metadata
-        // without opting into the wider full-registration surface.
-        registerCli: (registrar, opts) => registerCli(record, registrar, opts),
-        registerChannel: (registration) => registerChannel(record, registration, registrationMode),
+        ...(registrationCapabilities.metadataHandlers
+          ? {
+              // Allow setup-only/setup-runtime paths to surface parse-time CLI metadata
+              // without opting into the wider full-registration surface.
+              registerCli: (registrar, opts) => registerCli(record, registrar, opts),
+              registerChannel: (registration) =>
+                registerChannel(record, registration, registrationMode),
+            }
+          : {}),
       },
     });
   };

@@ -19,6 +19,10 @@ export type PluginSideEffectGuard = {
 type PluginRegistrationCapabilities = {
   /** Broad registry writes that discovery and live activation both need. */
   capabilityHandlers: boolean;
+  /** Typed hooks are the only writable surface exposed during transient install scans. */
+  typedHookHandlers: boolean;
+  /** CLI and channel metadata are available outside the hook-only install scan mode. */
+  metadataHandlers: boolean;
   /** Setup-runtime may publish pre-listen gateway surfaces without full activation. */
   setupRuntimeHandlers: boolean;
   /** Runtime channel registration is suppressed for setup-only and tool discovery loads. */
@@ -29,10 +33,11 @@ type PluginRegistrationCapabilities = {
 export function resolvePluginRegistrationCapabilities(
   mode: import("./types.js").PluginRegistrationMode,
 ): PluginRegistrationCapabilities {
-  const capabilityHandlers =
-    mode === "full" || mode === "discovery" || mode === "install-scan" || mode === "tool-discovery";
+  const capabilityHandlers = mode === "full" || mode === "discovery" || mode === "tool-discovery";
   return {
     capabilityHandlers,
+    typedHookHandlers: capabilityHandlers || mode === "install-scan",
+    metadataHandlers: mode !== "install-scan",
     setupRuntimeHandlers: mode === "setup-runtime",
     runtimeChannel: mode !== "setup-only" && mode !== "install-scan" && mode !== "tool-discovery",
   };
