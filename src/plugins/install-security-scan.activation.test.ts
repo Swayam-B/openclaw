@@ -491,6 +491,65 @@ describe("install hook provider activation", () => {
     expect(result?.blocked?.reason).toBe("blocked staged target payload");
   });
 
+  it("derives managed npm scanners from install records instead of persisted metadata", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceDir = makeTempDir();
+    const scanner = writeBeforeInstallBlocker(
+      "managed-install-scanner",
+      path.join(
+        stateDir,
+        "npm",
+        "projects",
+        "managed-install-scanner",
+        "node_modules",
+        "managed-install-scanner",
+      ),
+    );
+    const config = {
+      plugins: {
+        allow: [scanner.id],
+        entries: {
+          [scanner.id]: { enabled: true },
+        },
+      },
+    };
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () => {
+        await refreshPersistedInstalledPluginIndex({
+          reason: "source-changed",
+          config,
+          stateDir,
+          env: process.env,
+          installRecords: {
+            [scanner.id]: {
+              source: "npm",
+              spec: `${scanner.id}@1.0.0`,
+              installPath: scanner.dir,
+            },
+          },
+        });
+        resetPluginLoaderTestStateForTest();
+        return await evaluateSkillInstallPolicyRuntime({
+          config,
+          workspaceDir,
+          installId: "node",
+          logger: {},
+          origin: { type: "workspace" },
+          skillName: "payload",
+          sourceDir: makeTempDir(),
+        });
+      },
+    );
+
+    expect(result?.blocked?.reason).toBe("blocked staged target payload");
+  });
+
   it("preserves active plugin commands while activating a lazy hook provider", async () => {
     useNoBundledPlugins();
     const stateDir = makeTempDir();

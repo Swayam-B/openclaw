@@ -36,6 +36,7 @@ import { getGlobalHookRunner } from "./hook-runner-global.js";
 import { createHookRunner, type HookRunner } from "./hooks.js";
 import { createBeforeInstallHookPayload } from "./install-policy-context.js";
 import type { InstallSafetyOverrides } from "./install-security-scan.types.js";
+import { loadInstalledPluginIndexInstallRecordsSync } from "./installed-plugin-index-record-reader.js";
 import { readPersistedInstalledPluginIndexSync } from "./installed-plugin-index-store.js";
 import type { InstalledPluginIndex } from "./installed-plugin-index.js";
 import { normalizePluginPolicyId } from "./plugin-policy-id.js";
@@ -924,6 +925,7 @@ async function runBeforeInstallHook(params: {
       params.workspaceDir ?? resolveAgentWorkspaceDir(config, resolveDefaultAgentId(config));
     const pluginIndex = loadPluginRegistrySnapshot({
       config,
+      installRecords: loadInstalledPluginIndexInstallRecordsSync({ env: process.env }),
       workspaceDir,
       preferPersisted: false,
     });
@@ -932,6 +934,8 @@ async function runBeforeInstallHook(params: {
       message: string;
     }) =>
       diagnostic.level === "error" ||
+      diagnostic.message.includes("skipping discovery") ||
+      diagnostic.message.startsWith("blocked plugin candidate:") ||
       (diagnostic.message.includes("plugin requires ") &&
         diagnostic.message.includes("; skipping load"));
     const currentBlockingDiagnostics = (pluginIndex.diagnostics ?? []).filter(
@@ -998,7 +1002,7 @@ async function runBeforeInstallHook(params: {
       );
       return leftPaths.some((value) => rightPaths.has(value));
     };
-    const recoverableHookProviderRecords =
+    const persistedDiagnosticOwnerRecords =
       persistedPluginIndex?.plugins.filter((plugin) => {
         const selectedPlugin = pluginIndex.plugins.find(
           (candidate) =>
@@ -1015,10 +1019,10 @@ async function runBeforeInstallHook(params: {
         ) {
           return false;
         }
-        return plugin.startup.activationHooks?.includes("before_install") === true;
+        return true;
       }) ?? [];
     const pluginRecords = new Map(
-      recoverableHookProviderRecords.map((plugin) => [
+      persistedDiagnosticOwnerRecords.map((plugin) => [
         normalizePluginPolicyId(plugin.pluginId),
         plugin,
       ]),
@@ -1032,8 +1036,16 @@ async function runBeforeInstallHook(params: {
     const explicitlyEnabledPluginIdSet = new Set(
       explicitlyEnabledPluginIds.map(normalizePluginPolicyId),
     );
+    const recoverableHookProviderRecords = persistedDiagnosticOwnerRecords.filter(
+      (plugin) => plugin.startup.activationHooks?.includes("before_install") === true,
+    );
     const recoveredHookProviderRecords = recoverableHookProviderRecords.filter((plugin) =>
       explicitlyEnabledPluginIdSet.has(normalizePluginPolicyId(plugin.pluginId)),
+    );
+    const legacyUnknownHookProviderRecords = persistedDiagnosticOwnerRecords.filter(
+      (plugin) =>
+        plugin.startup.activationHooks === undefined &&
+        explicitlyEnabledPluginIdSet.has(normalizePluginPolicyId(plugin.pluginId)),
     );
     let hookProviderIds: readonly string[] = [];
     if (explicitlyEnabledPluginIds.length > 0) {
@@ -1079,6 +1091,9 @@ async function runBeforeInstallHook(params: {
                   hookProviderCandidateIds.has(diagnosticPluginId) &&
                   (!selectedPlugin || diagnosticMatchesRecord(diagnostic, selectedPlugin))) ||
                 recoveredHookProviderRecords.some((plugin) =>
+                  diagnosticMatchesRecord(diagnostic, plugin),
+                ) ||
+                legacyUnknownHookProviderRecords.some((plugin) =>
                   diagnosticMatchesRecord(diagnostic, plugin),
                 )
               );

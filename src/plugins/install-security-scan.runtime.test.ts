@@ -17,6 +17,7 @@ const createHookRunnerMock = vi.fn();
 const resolveManifestActivationPlanMock = vi.fn();
 const loadPluginRegistrySnapshotMock = vi.fn();
 const loadIsolatedPluginRegistryMock = vi.fn();
+const loadInstalledPluginIndexInstallRecordsSyncMock = vi.fn();
 const readPersistedInstalledPluginIndexSyncMock = vi.fn();
 
 vi.mock("../security/install-policy.js", async (importOriginal) => {
@@ -77,6 +78,11 @@ vi.mock("./installed-plugin-index-store.js", () => ({
     readPersistedInstalledPluginIndexSyncMock(...args),
 }));
 
+vi.mock("./installed-plugin-index-record-reader.js", () => ({
+  loadInstalledPluginIndexInstallRecordsSync: (...args: unknown[]) =>
+    loadInstalledPluginIndexInstallRecordsSyncMock(...args),
+}));
+
 vi.mock("./runtime/runtime-registry-loader.js", () => ({
   loadIsolatedPluginRegistry: (...args: unknown[]) => loadIsolatedPluginRegistryMock(...args),
 }));
@@ -130,6 +136,8 @@ beforeEach(() => {
   loadPluginRegistrySnapshotMock.mockReset();
   loadPluginRegistrySnapshotMock.mockReturnValue({ diagnostics: [], plugins: [] });
   loadIsolatedPluginRegistryMock.mockReset();
+  loadInstalledPluginIndexInstallRecordsSyncMock.mockReset();
+  loadInstalledPluginIndexInstallRecordsSyncMock.mockReturnValue({});
   loadIsolatedPluginRegistryMock.mockImplementation(
     (options: { onlyPluginIds?: readonly string[] } = {}) => ({
       hooks: [],
@@ -1101,6 +1109,91 @@ describe("legacy file install scan compatibility", () => {
       },
       workspaceDir: expect.any(String),
       onlyPluginIds: ["Local-Scanner", "Scanner-X"],
+    });
+  });
+
+  it("fails closed when discovery skips a persisted scanner", async () => {
+    const compatibilityMessage =
+      "plugin requires plugin API >=2026.8.1, but this host is 2026.7.2; skipping discovery";
+    loadPluginRegistrySnapshotMock.mockReturnValue({
+      diagnostics: [
+        {
+          level: "warn",
+          message: compatibilityMessage,
+          pluginId: "scanner",
+        },
+      ],
+      plugins: [],
+    });
+    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
+      plugins: [
+        {
+          compat: ["activation-capability-hint"],
+          origin: "global",
+          pluginId: "scanner",
+          startup: { activationHooks: ["before_install"] },
+        },
+      ],
+    });
+
+    const result = await scanFileInstallSourceRuntime({
+      config: {
+        plugins: {
+          entries: {
+            scanner: { enabled: true },
+          },
+        },
+      },
+      filePath: "/tmp/payload.js",
+      logger: {},
+      pluginId: "payload",
+    });
+
+    expect(result?.blocked).toEqual({
+      code: "security_scan_failed",
+      reason: expect.stringContaining(compatibilityMessage),
+    });
+  });
+
+  it("fails closed on discovery errors when legacy scanner metadata lacks hook fields", async () => {
+    const discoveryMessage = "invalid package plugin API metadata; skipping discovery";
+    loadPluginRegistrySnapshotMock.mockReturnValue({
+      diagnostics: [
+        {
+          level: "warn",
+          message: discoveryMessage,
+          pluginId: "scanner",
+        },
+      ],
+      plugins: [],
+    });
+    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
+      plugins: [
+        {
+          compat: [],
+          origin: "global",
+          pluginId: "scanner",
+          startup: {},
+        },
+      ],
+    });
+
+    const result = await scanFileInstallSourceRuntime({
+      config: {
+        plugins: {
+          entries: {
+            scanner: { enabled: true },
+          },
+        },
+      },
+      filePath: "/tmp/payload.js",
+      logger: {},
+      pluginId: "payload",
+    });
+
+    expect(result?.blocked).toEqual({
+      code: "security_scan_failed",
+      reason: expect.stringContaining(discoveryMessage),
     });
   });
 
