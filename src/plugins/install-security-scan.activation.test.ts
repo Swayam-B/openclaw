@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { withEnvAsync } from "../test-utils/env.js";
+import { listPluginCommands } from "./commands.js";
 import { resetGlobalHookRunner } from "./hook-runner-global.js";
 import {
   evaluateSkillInstallPolicyRuntime,
@@ -15,6 +16,7 @@ import {
   useNoBundledPlugins,
   writePlugin,
 } from "./loader.test-fixtures.js";
+import { ensurePluginRegistryLoaded } from "./runtime/runtime-registry-loader.js";
 
 function writeBeforeInstallBlocker(id: string, dir?: string) {
   const plugin = writePlugin({
@@ -33,6 +35,20 @@ function writeBeforeInstallBlocker(id: string, dir?: string) {
   manifest.activation = { onCapabilities: ["hook"] };
   fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
   return plugin;
+}
+
+function writeCommandPlugin(id: string) {
+  return writePlugin({
+    id,
+    filename: `${id}.cjs`,
+    body: `module.exports = { id: ${JSON.stringify(id)}, register(api) {
+      api.registerCommand({
+        name: "hello",
+        description: "hello",
+        handler: () => ({ text: "hello" }),
+      });
+    } };`,
+  });
 }
 
 afterEach(() => {
@@ -137,5 +153,95 @@ describe("install hook provider activation", () => {
         reason: "blocked staged target payload",
       },
     });
+  });
+
+  it("preserves active plugin commands while activating a lazy hook provider", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceDir = makeTempDir();
+    const commandPlugin = writeCommandPlugin("command-plugin");
+    const scanner = writeBeforeInstallBlocker("scanner");
+    const config = {
+      agents: { defaults: { workspace: workspaceDir } },
+      plugins: {
+        load: { paths: [commandPlugin.file, scanner.file] },
+      },
+    };
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () => {
+        ensurePluginRegistryLoaded({
+          config,
+          workspaceDir,
+          onlyPluginIds: [commandPlugin.id],
+        });
+        expect(listPluginCommands().map((command) => command.name)).toContain("hello");
+        const scanResult = await scanFileInstallSourceRuntime({
+          config,
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        });
+        expect(listPluginCommands().map((command) => command.name)).toContain("hello");
+        return scanResult;
+      },
+    );
+
+    expect(result).toEqual({
+      blocked: {
+        code: "security_scan_blocked",
+        reason: "blocked staged target payload",
+      },
+    });
+  });
+
+  it("stops dispatching a hook provider after it is disabled", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceDir = makeTempDir();
+    const scanner = writeBeforeInstallBlocker("scanner");
+    const enabledConfig = {
+      agents: { defaults: { workspace: workspaceDir } },
+      plugins: {
+        load: { paths: [scanner.file] },
+      },
+    };
+    const disabledConfig = {
+      ...enabledConfig,
+      plugins: {
+        ...enabledConfig.plugins,
+        entries: {
+          [scanner.id]: { enabled: false },
+        },
+      },
+    };
+
+    const [enabledResult, disabledResult] = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () => [
+        await scanFileInstallSourceRuntime({
+          config: enabledConfig,
+          filePath: path.join(makeTempDir(), "first.js"),
+          logger: {},
+          pluginId: "first",
+        }),
+        await scanFileInstallSourceRuntime({
+          config: disabledConfig,
+          filePath: path.join(makeTempDir(), "second.js"),
+          logger: {},
+          pluginId: "second",
+        }),
+      ],
+    );
+
+    expect(enabledResult?.blocked?.reason).toBe("blocked staged target first");
+    expect(disabledResult).toBeUndefined();
   });
 });

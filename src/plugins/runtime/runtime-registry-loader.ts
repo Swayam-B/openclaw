@@ -110,7 +110,12 @@ function resolveScopePluginIds(params: {
 
 function resolveOrLoadRuntimePluginRegistry(
   loadOptions: NonNullable<Parameters<typeof loadOpenClawPlugins>[0]>,
+  forceReload: boolean,
 ): void {
+  if (forceReload) {
+    loadOpenClawPlugins({ ...loadOptions, cache: false });
+    return;
+  }
   if (
     !getLoadedRuntimePluginRegistry({
       env: loadOptions.env,
@@ -131,6 +136,7 @@ export function ensurePluginRegistryLoaded(options?: {
   workspaceDir?: string;
   onlyPluginIds?: string[];
   onlyChannelIds?: string[];
+  forceReload?: boolean;
 }): void {
   const scope = options?.scope ?? "all";
   const requestedPluginIdsFromOptions = normalizePluginIdScope(options?.onlyPluginIds);
@@ -161,6 +167,7 @@ export function ensurePluginRegistryLoaded(options?: {
   const requestedPluginIdsForScope =
     scope === "all" && expectedPluginIds.length === 0 ? expectedPluginIds : undefined;
   if (
+    options?.forceReload !== true &&
     !scopedLoad &&
     scopeRank(pluginRegistryLoaded) >= scopeRank(scope) &&
     activeRegistrySatisfiesScope(
@@ -174,6 +181,7 @@ export function ensurePluginRegistryLoaded(options?: {
     return;
   }
   if (
+    options?.forceReload !== true &&
     (pluginRegistryLoaded === "none" || scopedLoad) &&
     activeRegistrySatisfiesScope(
       scope,
@@ -222,7 +230,7 @@ export function ensurePluginRegistryLoaded(options?: {
         : {}),
     },
   );
-  resolveOrLoadRuntimePluginRegistry(loadOptions);
+  resolveOrLoadRuntimePluginRegistry(loadOptions, options?.forceReload === true);
   if (!scopedLoad) {
     pluginRegistryLoaded = scope;
   }

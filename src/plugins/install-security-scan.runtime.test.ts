@@ -10,6 +10,8 @@ const getGlobalHookRunnerMock = vi.fn();
 const resolveManifestActivationPlanMock = vi.fn();
 const loadPluginRegistrySnapshotMock = vi.fn();
 const ensurePluginRegistryLoadedMock = vi.fn();
+const getActivePluginRegistryMock = vi.fn();
+const getActivePluginRegistryWorkspaceDirMock = vi.fn();
 
 vi.mock("../security/install-policy.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../security/install-policy.js")>();
@@ -52,6 +54,11 @@ vi.mock("./runtime/runtime-registry-loader.js", () => ({
   ensurePluginRegistryLoaded: (...args: unknown[]) => ensurePluginRegistryLoadedMock(...args),
 }));
 
+vi.mock("./runtime.js", () => ({
+  getActivePluginRegistry: () => getActivePluginRegistryMock(),
+  getActivePluginRegistryWorkspaceDir: () => getActivePluginRegistryWorkspaceDirMock(),
+}));
+
 const {
   evaluateSkillInstallPolicyRuntime,
   preflightPluginNpmInstallPolicyRuntime,
@@ -87,6 +94,10 @@ beforeEach(() => {
   loadPluginRegistrySnapshotMock.mockReset();
   loadPluginRegistrySnapshotMock.mockReturnValue({ plugins: [] });
   ensurePluginRegistryLoadedMock.mockReset();
+  getActivePluginRegistryMock.mockReset();
+  getActivePluginRegistryMock.mockReturnValue(null);
+  getActivePluginRegistryWorkspaceDirMock.mockReset();
+  getActivePluginRegistryWorkspaceDirMock.mockReturnValue(undefined);
 });
 
 describe("install security scan official bypass", () => {
@@ -260,7 +271,18 @@ describe("legacy file install scan compatibility", () => {
     };
     resolveManifestActivationPlanMock.mockReturnValue({
       diagnostics: [],
-      entries: [],
+      entries: [
+        {
+          pluginId: "scanner-a",
+          origin: "global",
+          reasons: ["activation-capability-hint"],
+        },
+        {
+          pluginId: "scanner-b",
+          origin: "global",
+          reasons: ["activation-capability-hint"],
+        },
+      ],
       pluginIds: ["scanner-a", "scanner-b"],
       trigger: { kind: "capability", capability: "hook" },
     });
@@ -293,10 +315,97 @@ describe("legacy file install scan compatibility", () => {
     expect(runBeforeInstall).toHaveBeenCalledOnce();
   });
 
+  it("preserves active plugins when activating a lazy hook provider", async () => {
+    const config = {
+      plugins: {
+        load: { paths: ["/tmp/command-plugin", "/tmp/scanner"] },
+      },
+    };
+    loadPluginRegistrySnapshotMock.mockReturnValue({
+      plugins: [
+        { enabled: true, origin: "config", pluginId: "command-plugin" },
+        { enabled: true, origin: "config", pluginId: "scanner" },
+      ],
+    });
+    resolveManifestActivationPlanMock.mockReturnValue({
+      diagnostics: [],
+      entries: [
+        {
+          pluginId: "scanner",
+          origin: "config",
+          reasons: ["activation-capability-hint"],
+        },
+      ],
+      pluginIds: ["scanner"],
+      trigger: { kind: "capability", capability: "hook" },
+    });
+    getActivePluginRegistryMock.mockReturnValue({
+      plugins: [{ id: "command-plugin", status: "loaded" }],
+    });
+    const hasHooks = vi.fn().mockReturnValue(true);
+    const runBeforeInstall = vi.fn().mockResolvedValue(undefined);
+    getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
+
+    await scanFileInstallSourceRuntime({
+      config,
+      filePath: "/tmp/payload.js",
+      logger: {},
+      pluginId: "payload",
+    });
+
+    expect(ensurePluginRegistryLoadedMock).toHaveBeenCalledWith({
+      config,
+      forceReload: true,
+      workspaceDir: expect.any(String),
+      onlyPluginIds: ["command-plugin", "scanner"],
+    });
+  });
+
+  it("does not treat bundle hook directories as before_install providers", async () => {
+    const config = {
+      plugins: {
+        load: { paths: ["/tmp/hook-bundle"] },
+      },
+    };
+    loadPluginRegistrySnapshotMock.mockReturnValue({
+      plugins: [{ enabled: true, origin: "config", pluginId: "hook-bundle" }],
+    });
+    resolveManifestActivationPlanMock.mockReturnValue({
+      diagnostics: [],
+      entries: [
+        {
+          pluginId: "hook-bundle",
+          origin: "config",
+          reasons: ["manifest-hook-owner"],
+        },
+      ],
+      pluginIds: ["hook-bundle"],
+      trigger: { kind: "capability", capability: "hook" },
+    });
+    getGlobalHookRunnerMock.mockReturnValue(null);
+
+    await expect(
+      scanFileInstallSourceRuntime({
+        config,
+        filePath: "/tmp/payload.js",
+        logger: {},
+        pluginId: "payload",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(ensurePluginRegistryLoadedMock).not.toHaveBeenCalled();
+  });
+
   it("fails closed when a declared hook provider cannot load", async () => {
     resolveManifestActivationPlanMock.mockReturnValue({
       diagnostics: [],
-      entries: [],
+      entries: [
+        {
+          pluginId: "scanner",
+          origin: "global",
+          reasons: ["activation-capability-hint"],
+        },
+      ],
       pluginIds: ["scanner"],
       trigger: { kind: "capability", capability: "hook" },
     });
@@ -380,7 +489,18 @@ describe("legacy file install scan compatibility", () => {
     });
     resolveManifestActivationPlanMock.mockReturnValue({
       diagnostics: [],
-      entries: [],
+      entries: [
+        {
+          pluginId: "Local-Scanner",
+          origin: "config",
+          reasons: ["activation-capability-hint"],
+        },
+        {
+          pluginId: "Scanner-X",
+          origin: "global",
+          reasons: ["activation-capability-hint"],
+        },
+      ],
       pluginIds: ["Local-Scanner", "Scanner-X"],
       trigger: { kind: "capability", capability: "hook" },
     });

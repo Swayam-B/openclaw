@@ -263,6 +263,31 @@ describe("ensurePluginRegistryLoaded", () => {
     expect(loadOptions(1).onlyPluginIds).toEqual(["demo-b"]);
   });
 
+  it("forces an exact scoped reload without reusing the active registry or cache", () => {
+    const activeRegistry = createEmptyPluginRegistry();
+    activeRegistry.plugins.push({
+      id: "demo",
+      source: "/tmp/demo.js",
+      origin: "workspace",
+      enabled: true,
+      status: "loaded",
+    } as never);
+    mocks.getActivePluginRegistry.mockReturnValue(activeRegistry);
+    mocks.getActivePluginRegistryWorkspaceDir.mockReturnValue("/resolved-workspace");
+
+    ensurePluginRegistryLoaded({
+      config: {} as never,
+      forceReload: true,
+      onlyPluginIds: ["demo"],
+    });
+
+    expect(mocks.loadOpenClawPlugins).toHaveBeenCalledOnce();
+    expect(loadOptions().cache).toBe(false);
+    expect(loadOptions().onlyPluginIds).toEqual(["demo"]);
+    expect(mocks.resolveCompatibleRuntimePluginRegistry).not.toHaveBeenCalled();
+    expect(mocks.resolveRuntimePluginRegistry).not.toHaveBeenCalled();
+  });
+
   it("maps explicit channel scopes to owner plugin ids before loading", () => {
     const rawConfig = { channels: { "external-chat": { token: "configured" } } };
     mocks.resolveDiscoverableScopedChannelPluginIds.mockReturnValue(["external-chat-plugin"]);
