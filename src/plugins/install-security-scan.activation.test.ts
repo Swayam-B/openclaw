@@ -59,7 +59,29 @@ function writeCommandPlugin(id: string, dir?: string) {
   });
 }
 
+function writeStatefulBeforeInstallBlocker(id: string) {
+  const plugin = writePlugin({
+    id,
+    filename: `${id}.cjs`,
+    body: `module.exports = { id: ${JSON.stringify(id)}, register(api) {
+      globalThis.__openclawInstallScannerInstances =
+        (globalThis.__openclawInstallScannerInstances || 0) + 1;
+      const instance = globalThis.__openclawInstallScannerInstances;
+      api.on("before_install", () => ({
+        block: true,
+        blockReason: "scanner instance " + instance,
+      }));
+    } };`,
+  });
+  const manifestPath = path.join(plugin.dir, "openclaw.plugin.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+  manifest.activation = { onCapabilities: ["hook"] };
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
+  return plugin;
+}
+
 afterEach(() => {
+  Reflect.deleteProperty(globalThis, "__openclawInstallScannerInstances");
   resetGlobalHookRunner();
   resetPluginLoaderTestStateForTest();
 });
@@ -234,6 +256,42 @@ describe("install hook provider activation", () => {
         reason: "blocked staged target payload",
       },
     });
+  });
+
+  it("reuses an active stateful hook provider instead of registering it again", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceDir = makeTempDir();
+    const scanner = writeStatefulBeforeInstallBlocker("stateful-scanner");
+    const config = {
+      agents: { defaults: { workspace: workspaceDir } },
+      plugins: {
+        load: { paths: [scanner.file] },
+      },
+    };
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () => {
+        ensurePluginRegistryLoaded({
+          config,
+          workspaceDir,
+          onlyPluginIds: [scanner.id],
+        });
+        return await scanFileInstallSourceRuntime({
+          config,
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        });
+      },
+    );
+
+    expect(result?.blocked?.reason).toBe("scanner instance 1");
+    expect(Reflect.get(globalThis, "__openclawInstallScannerInstances")).toBe(1);
   });
 
   it("fully loads a hook provider that is active only through a hookless setup runtime", async () => {

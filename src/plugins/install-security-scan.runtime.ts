@@ -51,6 +51,14 @@ function resolveBeforeInstallHookRunner(params: {
   logger: InstallScanLogger;
   workspaceDir: string;
 }): HookRunner | null {
+  const passesCurrentPolicy = (pluginId: string) => {
+    const normalizedId = normalizePluginPolicyId(pluginId);
+    return (
+      !params.disableAllPlugins &&
+      (params.allowedPluginIds === null || params.allowedPluginIds.has(normalizedId)) &&
+      !params.disabledPluginIds.has(normalizedId)
+    );
+  };
   if (
     params.hookProviderIds.length === 0 &&
     params.disabledPluginIds.size === 0 &&
@@ -59,15 +67,35 @@ function resolveBeforeInstallHookRunner(params: {
   ) {
     return getGlobalHookRunner();
   }
+  const globalRegistry = getGlobalHookRunnerRegistry();
+  const loadedGlobalPluginIds = new Set(
+    globalRegistry?.plugins
+      .filter((plugin) => plugin.status === "loaded")
+      .map((plugin) => normalizePluginPolicyId(plugin.id)) ?? [],
+  );
+  const globalBeforeInstallProviderIds = new Set([
+    ...(globalRegistry?.typedHooks
+      .filter((hook) => hook.hookName === "before_install")
+      .map((hook) => normalizePluginPolicyId(hook.pluginId)) ?? []),
+    ...(globalRegistry?.hooks
+      .filter((hook) => hook.events.includes("before_install"))
+      .map((hook) => normalizePluginPolicyId(hook.pluginId)) ?? []),
+  ]);
+  const hookProviderIdsToLoad = params.hookProviderIds.filter((pluginId) => {
+    const normalizedId = normalizePluginPolicyId(pluginId);
+    return (
+      passesCurrentPolicy(normalizedId) &&
+      !(loadedGlobalPluginIds.has(normalizedId) && globalBeforeInstallProviderIds.has(normalizedId))
+    );
+  });
   const isolatedRegistry =
-    params.hookProviderIds.length > 0
+    hookProviderIdsToLoad.length > 0
       ? loadIsolatedPluginRegistry({
           config: params.config,
           workspaceDir: params.workspaceDir,
-          onlyPluginIds: [...params.hookProviderIds],
+          onlyPluginIds: hookProviderIdsToLoad,
         })
       : undefined;
-  const globalRegistry = getGlobalHookRunnerRegistry();
   if (!isolatedRegistry && !globalRegistry) {
     return getGlobalHookRunner();
   }
@@ -76,12 +104,7 @@ function resolveBeforeInstallHookRunner(params: {
   );
   const includeGlobalPlugin = (pluginId: string) => {
     const normalizedId = normalizePluginPolicyId(pluginId);
-    return (
-      !params.disableAllPlugins &&
-      (params.allowedPluginIds === null || params.allowedPluginIds.has(normalizedId)) &&
-      !isolatedPluginIds.has(normalizedId) &&
-      !params.disabledPluginIds.has(normalizedId)
-    );
+    return passesCurrentPolicy(normalizedId) && !isolatedPluginIds.has(normalizedId);
   };
   const registry: GlobalHookRunnerRegistry = {
     hooks: [

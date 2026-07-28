@@ -782,8 +782,8 @@ describe("legacy file install scan compatibility", () => {
     };
     loadPluginRegistrySnapshotMock.mockReturnValue({
       plugins: [
-        { origin: "global", pluginId: "Scanner-X" },
-        { origin: "config", pluginId: "Local-Scanner" },
+        { enabled: true, origin: "global", pluginId: "Scanner-X" },
+        { enabled: true, origin: "config", pluginId: "Local-Scanner" },
       ],
     });
     resolveManifestActivationPlanMock.mockReturnValue({
