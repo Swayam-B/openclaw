@@ -682,6 +682,129 @@ describe("install hook provider activation", () => {
     expect(Reflect.get(globalThis, "__openclawInstallScannerInstances")).toBe(1);
   });
 
+  it("does not reuse an active hook without a current activation declaration", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceDir = makeTempDir();
+    const scanner = writeLabeledBeforeInstallBlocker(
+      "undeclared-active-scanner",
+      path.join(makeTempDir(), "undeclared-active-scanner"),
+      "undeclared active scanner",
+      { activationHint: false },
+    );
+    const config = {
+      agents: { defaults: { workspace: workspaceDir } },
+      plugins: {
+        load: { paths: [scanner.file] },
+      },
+    };
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () => {
+        ensurePluginRegistryLoaded({
+          config,
+          workspaceDir,
+          onlyPluginIds: [scanner.id],
+        });
+        return await scanFileInstallSourceRuntime({
+          config,
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        });
+      },
+    );
+
+    expect(result).toBeUndefined();
+  });
+
+  it("stops reusing an active scanner after its load path trust is removed", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceDir = makeTempDir();
+    const scanner = writeBeforeInstallBlocker("removed-load-path-scanner");
+    const enabledConfig = {
+      agents: { defaults: { workspace: workspaceDir } },
+      plugins: {
+        load: { paths: [scanner.file] },
+      },
+    };
+    const revokedConfig = {
+      agents: { defaults: { workspace: workspaceDir } },
+    };
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () => {
+        ensurePluginRegistryLoaded({
+          config: enabledConfig,
+          workspaceDir,
+          onlyPluginIds: [scanner.id],
+        });
+        return await scanFileInstallSourceRuntime({
+          config: revokedConfig,
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        });
+      },
+    );
+
+    expect(result).toBeUndefined();
+  });
+
+  it("loads the current same-id scanner source instead of reusing an active old source", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceDir = makeTempDir();
+    const scannerId = "replaced-source-scanner";
+    const scannerA = writeLabeledBeforeInstallBlocker(
+      scannerId,
+      path.join(makeTempDir(), "scanner-a"),
+      "old scanner source",
+    );
+    const scannerB = writeLabeledBeforeInstallBlocker(
+      scannerId,
+      path.join(makeTempDir(), "scanner-b"),
+      "current scanner source",
+    );
+    const configFor = (scannerFile: string) => ({
+      agents: { defaults: { workspace: workspaceDir } },
+      plugins: {
+        load: { paths: [scannerFile] },
+      },
+    });
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () => {
+        ensurePluginRegistryLoaded({
+          config: configFor(scannerA.file),
+          workspaceDir,
+          onlyPluginIds: [scannerId],
+        });
+        return await scanFileInstallSourceRuntime({
+          config: configFor(scannerB.file),
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        });
+      },
+    );
+
+    expect(result?.blocked?.reason).toBe("current scanner source");
+  });
+
   it("fully loads a hook provider that is active only through a hookless setup runtime", async () => {
     useNoBundledPlugins();
     const stateDir = makeTempDir();
@@ -979,7 +1102,6 @@ describe("install hook provider activation", () => {
       "legacy-pinned-scanner",
       path.join(workspaceDir, ".openclaw", "extensions", "legacy-pinned-scanner"),
       "same-workspace pinned scanner",
-      { activationHint: false },
     );
     const config = {
       plugins: {

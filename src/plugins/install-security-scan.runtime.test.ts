@@ -10,10 +10,7 @@ const findBlockedNodeModulesFileAliasMock = vi.fn();
 const findBlockedPackageDirectoryInPathMock = vi.fn();
 const findBlockedPackageFileAliasInPathMock = vi.fn();
 const getGlobalHookRunnerMock = vi.fn();
-const getGlobalHookRunnerRegistryMock = vi.fn();
 const getIsolatedGlobalHookRunnerRegistryMock = vi.fn();
-const getActivePluginRegistryMock = vi.fn();
-const getActivePluginRegistryWorkspaceDirMock = vi.fn();
 const collectLivePluginRegistriesMock = vi.fn();
 const getPluginRegistryWorkspaceDirMock = vi.fn();
 const createHookRunnerMock = vi.fn();
@@ -53,19 +50,12 @@ vi.mock("./dependency-denylist.js", async (importOriginal) => {
   };
 });
 
-vi.mock("./hook-runner-global.js", () => ({
-  getGlobalHookRunner: () => getGlobalHookRunnerMock(),
-}));
-
 vi.mock("./hook-runner-global-state.js", () => ({
-  getGlobalHookRunnerRegistry: () => getGlobalHookRunnerRegistryMock(),
   getIsolatedGlobalHookRunnerRegistry: () => getIsolatedGlobalHookRunnerRegistryMock(),
 }));
 
 vi.mock("./runtime.js", () => ({
   collectLivePluginRegistries: () => collectLivePluginRegistriesMock(),
-  getActivePluginRegistry: () => getActivePluginRegistryMock(),
-  getActivePluginRegistryWorkspaceDir: () => getActivePluginRegistryWorkspaceDirMock(),
   getPluginRegistryWorkspaceDir: (...args: unknown[]) => getPluginRegistryWorkspaceDirMock(...args),
 }));
 
@@ -112,6 +102,22 @@ function expectBuiltinInstallFrictionBypassed() {
   expect(findBlockedPackageFileAliasInPathMock).not.toHaveBeenCalled();
 }
 
+function useIsolatedSdkBeforeInstallHook(pluginId = "sdk-install-gate") {
+  getIsolatedGlobalHookRunnerRegistryMock.mockReturnValue({
+    hooks: [],
+    typedHooks: [
+      {
+        handler: vi.fn(),
+        hookName: "before_install",
+        pluginId,
+        priority: 0,
+        source: "sdk",
+      },
+    ],
+    plugins: [{ id: pluginId, status: "loaded" }],
+  });
+}
+
 beforeEach(() => {
   getRuntimeConfigMock.mockReset();
   getRuntimeConfigMock.mockReturnValue({});
@@ -122,14 +128,8 @@ beforeEach(() => {
   findBlockedPackageDirectoryInPathMock.mockReset();
   findBlockedPackageFileAliasInPathMock.mockReset();
   getGlobalHookRunnerMock.mockReset();
-  getGlobalHookRunnerRegistryMock.mockReset();
-  getGlobalHookRunnerRegistryMock.mockReturnValue(null);
   getIsolatedGlobalHookRunnerRegistryMock.mockReset();
   getIsolatedGlobalHookRunnerRegistryMock.mockReturnValue(null);
-  getActivePluginRegistryMock.mockReset();
-  getActivePluginRegistryMock.mockReturnValue(null);
-  getActivePluginRegistryWorkspaceDirMock.mockReset();
-  getActivePluginRegistryWorkspaceDirMock.mockReturnValue(undefined);
   collectLivePluginRegistriesMock.mockReset();
   collectLivePluginRegistriesMock.mockReturnValue([]);
   getPluginRegistryWorkspaceDirMock.mockReset();
@@ -170,6 +170,7 @@ describe("install security scan official bypass", () => {
     const hasHooks = vi.fn().mockReturnValue(true);
     const runBeforeInstall = vi.fn().mockResolvedValue(undefined);
     getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
+    useIsolatedSdkBeforeInstallHook();
 
     const result = await scanBundleInstallSourceRuntime({
       logger: {},
@@ -191,6 +192,7 @@ describe("install security scan official bypass", () => {
       blockReason: "scanner rejected source",
     });
     getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
+    useIsolatedSdkBeforeInstallHook();
 
     const result = await scanBundleInstallSourceRuntime({
       logger: {},
@@ -212,6 +214,7 @@ describe("install security scan official bypass", () => {
     const hasHooks = vi.fn().mockReturnValue(true);
     const runBeforeInstall = vi.fn().mockResolvedValue(undefined);
     getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
+    useIsolatedSdkBeforeInstallHook();
 
     const result = await evaluateSkillInstallPolicyRuntime({
       workspaceDir: "/tmp/openclaw-workspace",
@@ -236,6 +239,7 @@ describe("install security scan official bypass", () => {
     const hasHooks = vi.fn().mockReturnValue(true);
     const runBeforeInstall = vi.fn().mockResolvedValue(undefined);
     getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
+    useIsolatedSdkBeforeInstallHook();
 
     const result = await scanPackageInstallSourceRuntime({
       extensions: ["index.js"],
@@ -1412,6 +1416,7 @@ describe("legacy file install scan compatibility", () => {
     const hasHooks = vi.fn().mockReturnValue(true);
     const runBeforeInstall = vi.fn().mockResolvedValue(undefined);
     getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
+    useIsolatedSdkBeforeInstallHook();
     runInstallPolicyMock.mockResolvedValueOnce({
       findings: [
         {
