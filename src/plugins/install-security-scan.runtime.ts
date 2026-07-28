@@ -36,6 +36,7 @@ import type { InstallSafetyOverrides } from "./install-security-scan.types.js";
 import { readPersistedInstalledPluginIndexSync } from "./installed-plugin-index-store.js";
 import { normalizePluginPolicyId } from "./plugin-policy-id.js";
 import { loadPluginRegistrySnapshot } from "./plugin-registry-snapshot.js";
+import { getActivePluginRegistryWorkspaceDir } from "./runtime.js";
 import { loadIsolatedPluginRegistry } from "./runtime/runtime-registry-loader.js";
 
 type InstallScanLogger = {
@@ -81,11 +82,19 @@ function resolveBeforeInstallHookRunner(params: {
       .filter((hook) => hook.events.includes("before_install"))
       .map((hook) => normalizePluginPolicyId(hook.pluginId)) ?? []),
   ]);
+  const activeRegistryWorkspaceDir = getActivePluginRegistryWorkspaceDir();
+  const canReuseActiveProviders =
+    activeRegistryWorkspaceDir !== undefined &&
+    path.resolve(activeRegistryWorkspaceDir) === path.resolve(params.workspaceDir);
   const hookProviderIdsToLoad = params.hookProviderIds.filter((pluginId) => {
     const normalizedId = normalizePluginPolicyId(pluginId);
     return (
       passesCurrentPolicy(normalizedId) &&
-      !(loadedGlobalPluginIds.has(normalizedId) && globalBeforeInstallProviderIds.has(normalizedId))
+      !(
+        canReuseActiveProviders &&
+        loadedGlobalPluginIds.has(normalizedId) &&
+        globalBeforeInstallProviderIds.has(normalizedId)
+      )
     );
   });
   const isolatedRegistry =
