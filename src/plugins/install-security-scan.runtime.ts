@@ -829,7 +829,7 @@ async function runBeforeInstallHook(params: {
         path.resolve(diagnostic.source) === path.resolve(plugin.manifestPath)
       );
     };
-    const recoveredHookProviderRecords =
+    const recoverableHookProviderRecords =
       persistedPluginIndex?.plugins.filter((plugin) => {
         if (
           !currentErrorDiagnostics.some((diagnostic) => diagnosticMatchesRecord(diagnostic, plugin))
@@ -843,7 +843,7 @@ async function runBeforeInstallHook(params: {
         );
       }) ?? [];
     const pluginRecords = new Map(
-      recoveredHookProviderRecords.map((plugin) => [
+      recoverableHookProviderRecords.map((plugin) => [
         normalizePluginPolicyId(plugin.pluginId),
         plugin,
       ]),
@@ -854,6 +854,12 @@ async function runBeforeInstallHook(params: {
     const explicitlyEnabledPluginIds = resolveExplicitEffectivePluginIds(config, {
       pluginRecords: [...pluginRecords.values()],
     });
+    const explicitlyEnabledPluginIdSet = new Set(
+      explicitlyEnabledPluginIds.map(normalizePluginPolicyId),
+    );
+    const recoveredHookProviderRecords = recoverableHookProviderRecords.filter((plugin) =>
+      explicitlyEnabledPluginIdSet.has(normalizePluginPolicyId(plugin.pluginId)),
+    );
     let hookProviderIds: readonly string[] = [];
     if (explicitlyEnabledPluginIds.length > 0) {
       const activationPlan = resolveManifestActivationPlan({
@@ -867,7 +873,7 @@ async function runBeforeInstallHook(params: {
         },
       });
       const hookProviderCandidateIds = new Set(
-        [...pluginRecords.values()]
+        [...pluginIndex.plugins, ...recoveredHookProviderRecords]
           .filter(
             (plugin) =>
               plugin.startup?.activationCapabilities?.includes("hook") ||
