@@ -52,7 +52,7 @@ function writeBeforeInstallBlocker(
   });
   const manifestPath = path.join(plugin.dir, "openclaw.plugin.json");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
-  manifest.activation = { onCapabilities: ["hook"] };
+  manifest.activation = { onHooks: ["before_install"] };
   fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
   return plugin;
 }
@@ -88,7 +88,7 @@ function writeStatefulBeforeInstallBlocker(id: string) {
   });
   const manifestPath = path.join(plugin.dir, "openclaw.plugin.json");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
-  manifest.activation = { onCapabilities: ["hook"] };
+  manifest.activation = { onHooks: ["before_install"] };
   fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
   return plugin;
 }
@@ -113,7 +113,7 @@ function writeLabeledBeforeInstallBlocker(
   const manifestPath = path.join(plugin.dir, "openclaw.plugin.json");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
   if (options.activationHint !== false) {
-    manifest.activation = { onCapabilities: ["hook"] };
+    manifest.activation = { onHooks: ["before_install"] };
   }
   fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
   return plugin;
@@ -133,7 +133,7 @@ function writeContextEngineBeforeInstallBlocker(id: string, contextEngineId: str
   });
   const manifestPath = path.join(plugin.dir, "openclaw.plugin.json");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
-  manifest.activation = { onCapabilities: ["hook"] };
+  manifest.activation = { onHooks: ["before_install"] };
   fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
   return plugin;
 }
@@ -237,6 +237,38 @@ describe("install hook provider activation", () => {
         "hook providers did not register before_install in install-scan mode: full-only-scanner",
       ),
     });
+  });
+
+  it("does not treat the broad hook capability as an install scanner declaration", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const plugin = writePlugin({
+      id: "agent-run-hook",
+      filename: "agent-run-hook.cjs",
+      body: `module.exports = { id: "agent-run-hook", register(api) {
+        api.on("before_agent_run", () => ({ block: false }));
+      } };`,
+    });
+    const manifestPath = path.join(plugin.dir, "openclaw.plugin.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+    manifest.activation = { onCapabilities: ["hook"] };
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () =>
+        await scanFileInstallSourceRuntime({
+          config: { plugins: { load: { paths: [plugin.file] } } },
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        }),
+    );
+
+    expect(result).toBeUndefined();
   });
 
   it("loads a memory-capable scanner even when another plugin owns the memory slot", async () => {

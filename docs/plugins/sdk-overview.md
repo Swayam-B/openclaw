@@ -658,7 +658,7 @@ semantics.
 ### Hook decision semantics
 
 `before_install` is a plugin-runtime lifecycle hook, not the operator install
-policy surface. Declare `activation.onCapabilities: ["hook"]` so an explicitly
+policy surface. Declare `activation.onHooks: ["before_install"]` so an explicitly
 trusted plugin is loaded for CLI and Gateway-backed install or update paths.
 Use `security.installPolicy` for operator-owned decisions because a plugin
 cannot inspect its own first installation and disabling it disables its hook.

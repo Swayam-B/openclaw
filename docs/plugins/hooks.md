@@ -721,7 +721,7 @@ fails closed when enabled but unavailable.
 
 `before_install` is a plugin-runtime lifecycle hook. A plugin that needs it on
 CLI and Gateway-backed install/update paths must declare
-`activation.onCapabilities: ["hook"]` in `openclaw.plugin.json` and be
+`activation.onHooks: ["before_install"]` in `openclaw.plugin.json` and be
 explicitly trusted by plugin config. OpenClaw loads every matching plugin
 before dispatch, after `security.installPolicy` and after the staged source is
 available. It is useful for plugin-owned scanning, warnings, and compatibility

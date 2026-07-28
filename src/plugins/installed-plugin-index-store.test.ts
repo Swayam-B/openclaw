@@ -69,6 +69,7 @@ function createCandidate(
     id?: string;
     configPaths?: readonly string[];
     activationCapabilities?: readonly string[];
+    activationHooks?: readonly string[];
   } = {},
 ): PluginCandidate {
   const id = options.id ?? "demo";
@@ -84,13 +85,14 @@ function createCandidate(
       name: id === "demo" ? "Demo" : "Next Demo",
       configSchema: { type: "object" },
       providers: [id],
-      ...(options.configPaths || options.activationCapabilities
+      ...(options.configPaths || options.activationCapabilities || options.activationHooks
         ? {
             activation: {
               ...(options.configPaths ? { onConfigPaths: options.configPaths } : {}),
               ...(options.activationCapabilities
                 ? { onCapabilities: options.activationCapabilities }
                 : {}),
+              ...(options.activationHooks ? { onHooks: options.activationHooks } : {}),
             },
           }
         : {}),
@@ -463,6 +465,31 @@ describe("installed plugin index persistence", () => {
     expect(refreshed.plugins[0]?.startup.activationCapabilities).toEqual(["hook"]);
     const persisted = requirePersisted(await readPersistedInstalledPluginIndex({ stateDir }));
     expect(persisted.plugins[0]?.startup.activationCapabilities).toEqual(["hook"]);
+  });
+
+  it("persists dedicated install-hook activation metadata", async () => {
+    const stateDir = makeTempDir();
+    const pluginDir = path.join(stateDir, "plugins", "scanner");
+    fs.mkdirSync(pluginDir, { recursive: true });
+    const candidate = createCandidate(pluginDir, {
+      id: "scanner",
+      activationHooks: ["before_install"],
+    });
+
+    const refreshed = await refreshPersistedInstalledPluginIndex({
+      reason: "manual",
+      stateDir,
+      candidates: [candidate],
+      env: {
+        OPENCLAW_BUNDLED_PLUGINS_DIR: undefined,
+        OPENCLAW_VERSION: "2026.4.25",
+        VITEST: "true",
+      },
+    });
+
+    expect(refreshed.plugins[0]?.startup.activationHooks).toEqual(["before_install"]);
+    const persisted = requirePersisted(await readPersistedInstalledPluginIndex({ stateDir }));
+    expect(persisted.plugins[0]?.startup.activationHooks).toEqual(["before_install"]);
   });
 
   it("does not preserve prototype poison keys from persisted index JSON", async () => {

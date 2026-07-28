@@ -151,6 +151,7 @@ export type PluginManifestSecretProviderIntegration = {
 };
 
 export type PluginManifestActivationCapability = "provider" | "channel" | "tool" | "hook";
+export type PluginManifestActivationHook = "before_install";
 
 export type PluginManifestActivation = {
   /**
@@ -174,6 +175,8 @@ export type PluginManifestActivation = {
   onRoutes?: string[];
   /** Root-relative config paths that should include this plugin in startup/load plans. */
   onConfigPaths?: string[];
+  /** Lifecycle hooks that require loading this plugin before the hook is dispatched. */
+  onHooks?: PluginManifestActivationHook[];
   /** Broad capability hints for activation/load plans. Prefer narrower ownership metadata. */
   onCapabilities?: PluginManifestActivationCapability[];
 };

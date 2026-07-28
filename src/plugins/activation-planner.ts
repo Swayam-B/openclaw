@@ -11,7 +11,10 @@ import {
 } from "./manifest-owner-policy.js";
 import type { PluginManifestRecord } from "./manifest-registry.js";
 import type { PluginDiagnostic } from "./manifest-types.js";
-import type { PluginManifestActivationCapability } from "./manifest.js";
+import type {
+  PluginManifestActivationCapability,
+  PluginManifestActivationHook,
+} from "./manifest.js";
 import type { PluginOrigin } from "./plugin-origin.types.js";
 import { loadPluginManifestRegistryForPluginRegistry } from "./plugin-registry-contributions.js";
 import { createPluginIdScopeSet, normalizePluginIdScope } from "./plugin-scope.js";
@@ -23,6 +26,7 @@ type PluginActivationPlannerTrigger =
   | { kind: "agentHarness"; runtime: string }
   | { kind: "channel"; channel: string }
   | { kind: "route"; route: string }
+  | { kind: "hook"; hook: PluginManifestActivationHook }
   | { kind: "capability"; capability: PluginManifestActivationCapability };
 
 type PluginActivationPlannerHintReason =
@@ -30,6 +34,7 @@ type PluginActivationPlannerHintReason =
   | "activation-capability-hint"
   | "activation-channel-hint"
   | "activation-command-hint"
+  | "activation-hook-hint"
   | "activation-provider-hint"
   | "activation-route-hint";
 
@@ -172,6 +177,8 @@ function listManifestActivationTriggerReasons(
       return listChannelTriggerReasons(plugin, normalizeCommandId(trigger.channel));
     case "route":
       return listRouteTriggerReasons(plugin, normalizeCommandId(trigger.route));
+    case "hook":
+      return listHookTriggerReasons(plugin, trigger.hook);
     case "capability":
       return listCapabilityTriggerReasons(plugin, trigger.capability);
   }
@@ -248,6 +255,13 @@ function listRouteTriggerReasons(
   return listHasNormalizedValue(plugin.activation?.onRoutes, route, normalizeCommandId)
     ? ["activation-route-hint"]
     : [];
+}
+
+function listHookTriggerReasons(
+  plugin: PluginManifestRecord,
+  hook: PluginManifestActivationHook,
+): PluginActivationPlannerReason[] {
+  return plugin.activation?.onHooks?.includes(hook) ? ["activation-hook-hint"] : [];
 }
 
 function listCapabilityTriggerReasons(

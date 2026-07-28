@@ -7,6 +7,7 @@ import { isRecord } from "../utils.js";
 import type {
   PluginManifestActivation,
   PluginManifestActivationCapability,
+  PluginManifestActivationHook,
   PluginManifestChannelCommandDefaults,
   PluginManifestChannelConfig,
   PluginManifestDashboard,
@@ -33,6 +34,9 @@ export function normalizeManifestActivation(value: unknown): PluginManifestActiv
   const onChannels = normalizeTrimmedStringList(value.onChannels);
   const onRoutes = normalizeTrimmedStringList(value.onRoutes);
   const onConfigPaths = normalizeTrimmedStringList(value.onConfigPaths);
+  const onHooks = normalizeTrimmedStringList(value.onHooks).filter(
+    (hook): hook is PluginManifestActivationHook => hook === "before_install",
+  );
   const onStartup = typeof value.onStartup === "boolean" ? value.onStartup : undefined;
   const onCapabilities = normalizeTrimmedStringList(value.onCapabilities).filter(
     (capability): capability is PluginManifestActivationCapability =>
@@ -50,6 +54,7 @@ export function normalizeManifestActivation(value: unknown): PluginManifestActiv
     ...(onChannels.length > 0 ? { onChannels } : {}),
     ...(onRoutes.length > 0 ? { onRoutes } : {}),
     ...(onConfigPaths.length > 0 ? { onConfigPaths } : {}),
+    ...(onHooks.length > 0 ? { onHooks } : {}),
     ...(onCapabilities.length > 0 ? { onCapabilities } : {}),
   } satisfies PluginManifestActivation;
 

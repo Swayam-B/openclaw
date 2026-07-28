@@ -125,7 +125,7 @@ beforeEach(() => {
     diagnostics: [],
     entries: [],
     pluginIds: [],
-    trigger: { kind: "capability", capability: "hook" },
+    trigger: { kind: "hook", hook: "before_install" },
   });
   loadPluginRegistrySnapshotMock.mockReset();
   loadPluginRegistrySnapshotMock.mockReturnValue({ diagnostics: [], plugins: [] });
@@ -322,16 +322,16 @@ describe("legacy file install scan compatibility", () => {
         {
           pluginId: "scanner-a",
           origin: "global",
-          reasons: ["activation-capability-hint"],
+          reasons: ["activation-hook-hint"],
         },
         {
           pluginId: "scanner-b",
           origin: "global",
-          reasons: ["activation-capability-hint"],
+          reasons: ["activation-hook-hint"],
         },
       ],
       pluginIds: ["scanner-a", "scanner-b"],
-      trigger: { kind: "capability", capability: "hook" },
+      trigger: { kind: "hook", hook: "before_install" },
     });
     const hasHooks = vi.fn().mockReturnValue(true);
     const runBeforeInstall = vi.fn().mockResolvedValue(undefined);
@@ -350,8 +350,8 @@ describe("legacy file install scan compatibility", () => {
       onlyPluginIds: ["scanner-a", "scanner-b"],
       requireExplicitManifestOwnerTrust: true,
       trigger: {
-        kind: "capability",
-        capability: "hook",
+        kind: "hook",
+        hook: "before_install",
       },
     });
     expect(loadIsolatedPluginRegistryMock).toHaveBeenCalledWith({
@@ -380,11 +380,11 @@ describe("legacy file install scan compatibility", () => {
         {
           pluginId: "scanner",
           origin: "config",
-          reasons: ["activation-capability-hint"],
+          reasons: ["activation-hook-hint"],
         },
       ],
       pluginIds: ["scanner"],
-      trigger: { kind: "capability", capability: "hook" },
+      trigger: { kind: "hook", hook: "before_install" },
     });
     const hasHooks = vi.fn().mockReturnValue(true);
     const runBeforeInstall = vi.fn().mockResolvedValue(undefined);
@@ -423,7 +423,7 @@ describe("legacy file install scan compatibility", () => {
         },
       ],
       pluginIds: ["hook-bundle"],
-      trigger: { kind: "capability", capability: "hook" },
+      trigger: { kind: "hook", hook: "before_install" },
     });
     getGlobalHookRunnerMock.mockReturnValue(null);
 
@@ -446,11 +446,11 @@ describe("legacy file install scan compatibility", () => {
         {
           pluginId: "scanner",
           origin: "global",
-          reasons: ["activation-capability-hint"],
+          reasons: ["activation-hook-hint"],
         },
       ],
       pluginIds: ["scanner"],
-      trigger: { kind: "capability", capability: "hook" },
+      trigger: { kind: "hook", hook: "before_install" },
     });
     loadIsolatedPluginRegistryMock.mockImplementation(() => {
       throw new Error("scanner runtime unavailable");
@@ -485,7 +485,7 @@ describe("legacy file install scan compatibility", () => {
         {
           enabled: true,
           pluginId: "scanner",
-          startup: { activationCapabilities: ["hook"] },
+          startup: { activationHooks: ["before_install"] },
         },
       ],
     });
@@ -499,7 +499,7 @@ describe("legacy file install scan compatibility", () => {
       ],
       entries: [],
       pluginIds: [],
-      trigger: { kind: "capability", capability: "hook" },
+      trigger: { kind: "hook", hook: "before_install" },
     });
 
     const result = await scanFileInstallSourceRuntime({
@@ -543,7 +543,7 @@ describe("legacy file install scan compatibility", () => {
           compat: ["activation-capability-hint"],
           origin: "global",
           pluginId: "scanner",
-          startup: { activationCapabilities: ["hook"] },
+          startup: { activationHooks: ["before_install"] },
         },
       ],
     });
@@ -557,7 +557,7 @@ describe("legacy file install scan compatibility", () => {
       ],
       entries: [],
       pluginIds: [],
-      trigger: { kind: "capability", capability: "hook" },
+      trigger: { kind: "hook", hook: "before_install" },
     });
 
     const result = await scanFileInstallSourceRuntime({
@@ -602,7 +602,7 @@ describe("legacy file install scan compatibility", () => {
           manifestPath,
           origin: "global",
           pluginId: "canonical-scanner",
-          startup: { activationCapabilities: ["hook"] },
+          startup: { activationHooks: ["before_install"] },
         },
       ],
     });
@@ -610,7 +610,7 @@ describe("legacy file install scan compatibility", () => {
       diagnostics: [],
       entries: [],
       pluginIds: [],
-      trigger: { kind: "capability", capability: "hook" },
+      trigger: { kind: "hook", hook: "before_install" },
     });
 
     const result = await scanFileInstallSourceRuntime({
@@ -660,7 +660,7 @@ describe("legacy file install scan compatibility", () => {
           },
           pluginId: "canonical-scanner",
           rootDir,
-          startup: { activationCapabilities: ["hook"] },
+          startup: { activationHooks: ["before_install"] },
         },
       ],
     });
@@ -668,7 +668,7 @@ describe("legacy file install scan compatibility", () => {
       diagnostics: [],
       entries: [],
       pluginIds: [],
-      trigger: { kind: "capability", capability: "hook" },
+      trigger: { kind: "hook", hook: "before_install" },
     });
 
     const result = await scanFileInstallSourceRuntime({
@@ -713,7 +713,7 @@ describe("legacy file install scan compatibility", () => {
           origin: "config",
           pluginId: "scanner",
           rootDir,
-          startup: { activationCapabilities: ["hook"] },
+          startup: { activationHooks: ["before_install"] },
         },
       ],
     });
@@ -721,7 +721,7 @@ describe("legacy file install scan compatibility", () => {
       diagnostics: [],
       entries: [],
       pluginIds: [],
-      trigger: { kind: "capability", capability: "hook" },
+      trigger: { kind: "hook", hook: "before_install" },
     });
 
     const result = await scanFileInstallSourceRuntime({
@@ -764,7 +764,7 @@ describe("legacy file install scan compatibility", () => {
           origin: "config",
           pluginId: "scanner",
           rootDir: overrideRoot,
-          startup: { activationCapabilities: ["hook"] },
+          startup: { activationHooks: ["before_install"] },
         },
       ],
     });
@@ -777,7 +777,7 @@ describe("legacy file install scan compatibility", () => {
           origin: "global",
           pluginId: "scanner",
           rootDir: persistedRoot,
-          startup: { activationCapabilities: ["hook"] },
+          startup: { activationHooks: ["before_install"] },
         },
       ],
     });
@@ -787,11 +787,11 @@ describe("legacy file install scan compatibility", () => {
         {
           origin: "config",
           pluginId: "scanner",
-          reasons: ["activation-capability-hint"],
+          reasons: ["activation-hook-hint"],
         },
       ],
       pluginIds: ["scanner"],
-      trigger: { kind: "capability", capability: "hook" },
+      trigger: { kind: "hook", hook: "before_install" },
     });
 
     await expect(
@@ -835,7 +835,7 @@ describe("legacy file install scan compatibility", () => {
           manifestPath,
           origin: "global",
           pluginId: "scanner",
-          startup: { activationCapabilities: ["hook"] },
+          startup: { activationHooks: ["before_install"] },
         },
       ],
     });
@@ -849,7 +849,7 @@ describe("legacy file install scan compatibility", () => {
       ],
       entries: [],
       pluginIds: [],
-      trigger: { kind: "capability", capability: "hook" },
+      trigger: { kind: "hook", hook: "before_install" },
     });
     getGlobalHookRunnerMock.mockReturnValue(null);
 
@@ -892,7 +892,7 @@ describe("legacy file install scan compatibility", () => {
           manifestPath,
           origin: "config",
           pluginId: "scanner",
-          startup: { activationCapabilities: ["hook"] },
+          startup: { activationHooks: ["before_install"] },
         },
       ],
     });
@@ -906,7 +906,7 @@ describe("legacy file install scan compatibility", () => {
       ],
       entries: [],
       pluginIds: [],
-      trigger: { kind: "capability", capability: "hook" },
+      trigger: { kind: "hook", hook: "before_install" },
     });
     getGlobalHookRunnerMock.mockReturnValue(null);
 
@@ -935,7 +935,7 @@ describe("legacy file install scan compatibility", () => {
         {
           enabled: true,
           pluginId: "scanner",
-          startup: { activationCapabilities: ["hook"] },
+          startup: { activationHooks: ["before_install"] },
         },
         {
           enabled: true,
@@ -955,11 +955,11 @@ describe("legacy file install scan compatibility", () => {
         {
           pluginId: "scanner",
           origin: "global",
-          reasons: ["activation-capability-hint"],
+          reasons: ["activation-hook-hint"],
         },
       ],
       pluginIds: ["scanner"],
-      trigger: { kind: "capability", capability: "hook" },
+      trigger: { kind: "hook", hook: "before_install" },
     });
 
     await expect(
@@ -1004,16 +1004,16 @@ describe("legacy file install scan compatibility", () => {
         {
           pluginId: "Local-Scanner",
           origin: "config",
-          reasons: ["activation-capability-hint"],
+          reasons: ["activation-hook-hint"],
         },
         {
           pluginId: "Scanner-X",
           origin: "global",
-          reasons: ["activation-capability-hint"],
+          reasons: ["activation-hook-hint"],
         },
       ],
       pluginIds: ["Local-Scanner", "Scanner-X"],
-      trigger: { kind: "capability", capability: "hook" },
+      trigger: { kind: "hook", hook: "before_install" },
     });
     const hasHooks = vi.fn().mockReturnValue(true);
     const runBeforeInstall = vi.fn().mockResolvedValue(undefined);

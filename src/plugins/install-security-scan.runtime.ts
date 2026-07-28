@@ -998,11 +998,7 @@ async function runBeforeInstallHook(params: {
         ) {
           return false;
         }
-        return (
-          plugin.startup.activationCapabilities?.includes("hook") ||
-          (plugin.startup.activationCapabilities === undefined &&
-            plugin.compat.includes("activation-capability-hint"))
-        );
+        return plugin.startup.activationHooks?.includes("before_install") === true;
       }) ?? [];
     const pluginRecords = new Map(
       recoverableHookProviderRecords.map((plugin) => [
@@ -1030,22 +1026,17 @@ async function runBeforeInstallHook(params: {
         onlyPluginIds: explicitlyEnabledPluginIds,
         requireExplicitManifestOwnerTrust: true,
         trigger: {
-          kind: "capability",
-          capability: "hook",
+          kind: "hook",
+          hook: "before_install",
         },
       });
       const hookProviderCandidateIds = new Set(
         [...pluginIndex.plugins, ...recoveredHookProviderRecords]
-          .filter(
-            (plugin) =>
-              plugin.startup?.activationCapabilities?.includes("hook") ||
-              (plugin.startup?.activationCapabilities === undefined &&
-                plugin.compat?.includes("activation-capability-hint")),
-          )
+          .filter((plugin) => plugin.startup?.activationHooks?.includes("before_install") === true)
           .map((plugin) => normalizePluginPolicyId(plugin.pluginId)),
       );
       for (const entry of activationPlan.entries) {
-        if (entry.reasons.includes("activation-capability-hint")) {
+        if (entry.reasons.includes("activation-hook-hint")) {
           hookProviderCandidateIds.add(normalizePluginPolicyId(entry.pluginId));
         }
       }
@@ -1087,7 +1078,7 @@ async function runBeforeInstallHook(params: {
         );
       }
       hookProviderIds = activationPlan.entries
-        .filter((entry) => entry.reasons.includes("activation-capability-hint"))
+        .filter((entry) => entry.reasons.includes("activation-hook-hint"))
         .map((entry) => entry.pluginId);
     }
     const normalizedPlugins = normalizePluginsConfig(config.plugins);

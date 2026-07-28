@@ -331,7 +331,7 @@ describe("activation planner", () => {
     ).toEqual(["demo-channel"]);
   });
 
-  it("plans every explicitly trusted hook-capability plugin", () => {
+  it("plans every explicitly trusted before_install hook plugin", () => {
     mocks.loadPluginManifestRegistryForPluginRegistry.mockReturnValue({
       plugins: [
         {
@@ -341,7 +341,7 @@ describe("activation planner", () => {
           cliBackends: [],
           skills: [],
           hooks: [],
-          activation: { onCapabilities: ["hook"] },
+          activation: { onHooks: ["before_install"] },
           origin: "global",
         },
         {
@@ -351,7 +351,7 @@ describe("activation planner", () => {
           cliBackends: [],
           skills: [],
           hooks: [],
-          activation: { onCapabilities: ["hook"] },
+          activation: { onHooks: ["before_install"] },
           origin: "global",
         },
         {
@@ -361,7 +361,7 @@ describe("activation planner", () => {
           cliBackends: [],
           skills: [],
           hooks: [],
-          activation: { onCapabilities: ["hook"] },
+          activation: { onHooks: ["before_install"] },
           origin: "global",
         },
       ],
@@ -382,8 +382,8 @@ describe("activation planner", () => {
         onlyPluginIds: ["scanner-a", "scanner-b", "scanner-disabled"],
         requireExplicitManifestOwnerTrust: true,
         trigger: {
-          kind: "capability",
-          capability: "hook",
+          kind: "hook",
+          hook: "before_install",
         },
       }),
     ).toEqual(["scanner-a", "scanner-b"]);

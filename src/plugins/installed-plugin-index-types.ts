@@ -10,6 +10,7 @@ import type { PluginDiagnostic } from "./manifest-types.js";
 import type {
   OpenClawPackageBuild,
   PluginManifestActivationCapability,
+  PluginManifestActivationHook,
   PluginPackageChannel,
 } from "./manifest.js";
 
@@ -37,6 +38,8 @@ export type InstalledPluginStartupInfo = {
   agentHarnesses: readonly string[];
   /** Capability-trigger hints retained for fail-closed activation planning. */
   activationCapabilities?: readonly PluginManifestActivationCapability[];
+  /** Hook-trigger hints retained for fail-closed activation planning. */
+  activationHooks?: readonly PluginManifestActivationHook[];
   /**
    * Manifest activation.onConfigPaths copied into the installed index for
    * pre-manifest startup scoping. Missing on older persisted index files.
