@@ -537,7 +537,7 @@ export function defineBundledChannelEntry<TPlugin = ChannelPlugin>({
         registerCliMetadata?.(api);
         return;
       }
-      if (api.registrationMode === "tool-discovery") {
+      if (api.registrationMode === "install-scan" || api.registrationMode === "tool-discovery") {
         const profile = createProfiler({ pluginId: id, source: importMetaUrl });
         profile("bundled-register:registerFull", () => registerFull?.(api));
         return;

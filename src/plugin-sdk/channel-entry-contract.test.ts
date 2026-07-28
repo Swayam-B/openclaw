@@ -157,6 +157,33 @@ describe("defineBundledChannelEntry", () => {
     expect(fs.existsSync(runtimeMarker)).toBe(false);
   });
 
+  it("runs install hook registrations without channel sidecar hydration during install scan", () => {
+    const tempRoot = tempDirs.make("openclaw-bundled-entry-install-scan-");
+    const runtimeMarker = path.join(tempRoot, "runtime-loaded");
+    const pluginId = "bundled-install-scanner";
+    const { importerPath } = writeBundledChannelFixture({
+      pluginRoot: path.join(tempRoot, "dist", "extensions", pluginId),
+      pluginId,
+      runtimeMarker,
+    });
+    const registerCliMetadata = vi.fn<(api: OpenClawPluginApi) => void>();
+    const registerFull = vi.fn<(api: OpenClawPluginApi) => void>();
+    const entry = createBundledChannelEntry({
+      importerPath,
+      pluginId,
+      registerCliMetadata,
+      registerFull,
+    });
+
+    const api = createApi("install-scan");
+    entry.register(api);
+
+    expect(api.registerChannel).not.toHaveBeenCalled();
+    expect(registerCliMetadata).not.toHaveBeenCalled();
+    expect(registerFull).toHaveBeenCalledWith(api);
+    expect(fs.existsSync(runtimeMarker)).toBe(false);
+  });
+
   it("loads runtime sidecars during discovery registration", () => {
     const tempRoot = tempDirs.make("openclaw-bundled-entry-runtime-");
     const runtimeMarker = path.join(tempRoot, "runtime-loaded");
