@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
+import {
+  clearContextEnginesForOwner,
+  getContextEngineRegistration,
+} from "../context-engine/registry.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import { listPluginCommands } from "./commands.js";
 import { resetGlobalHookRunner } from "./hook-runner-global.js";
@@ -103,8 +107,28 @@ function writeLabeledBeforeInstallBlocker(id: string, dir: string, label: string
   return plugin;
 }
 
+function writeContextEngineBeforeInstallBlocker(id: string, contextEngineId: string) {
+  const plugin = writePlugin({
+    id,
+    filename: `${id}.cjs`,
+    body: `module.exports = { id: ${JSON.stringify(id)}, register(api) {
+      api.registerContextEngine(${JSON.stringify(contextEngineId)}, () => ({}));
+      api.on("before_install", () => ({
+        block: true,
+        blockReason: "blocked by context-engine scanner",
+      }));
+    } };`,
+  });
+  const manifestPath = path.join(plugin.dir, "openclaw.plugin.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+  manifest.activation = { onCapabilities: ["hook"] };
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
+  return plugin;
+}
+
 afterEach(() => {
   Reflect.deleteProperty(globalThis, "__openclawInstallScannerInstances");
+  clearContextEnginesForOwner("plugin:context-engine-scanner");
   resetGlobalHookRunner();
   resetPluginLoaderTestStateForTest();
 });
@@ -172,6 +196,38 @@ describe("install hook provider activation", () => {
     );
 
     expect(result?.blocked?.reason).toBe("blocked staged target payload");
+  });
+
+  it("does not leak context engines from an isolated full-mode scanner", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const contextEngineId = "isolated-scanner-context-engine";
+    const scanner = writeContextEngineBeforeInstallBlocker(
+      "context-engine-scanner",
+      contextEngineId,
+    );
+    const config = {
+      plugins: {
+        load: { paths: [scanner.file] },
+      },
+    };
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () =>
+        await scanFileInstallSourceRuntime({
+          config,
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        }),
+    );
+
+    expect(result?.blocked?.reason).toBe("blocked by context-engine scanner");
+    expect(getContextEngineRegistration(contextEngineId)).toBeUndefined();
   });
 
   it("does not execute a staged plugin as its own first-install scanner", async () => {

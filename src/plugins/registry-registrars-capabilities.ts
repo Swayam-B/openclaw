@@ -15,7 +15,7 @@ import { defaultSlotIdForKey } from "./slots.js";
 import type { OpenClawPluginApi, PluginRegistrationMode } from "./types.js";
 
 export function createCapabilityRegistrars(state: PluginRegistryState) {
-  const { registry, pushDiagnostic } = state;
+  const { registry, registryParams, pushDiagnostic } = state;
 
   const registerDetachedTaskRuntime = (
     record: PluginRecord,
@@ -91,6 +91,24 @@ export function createCapabilityRegistrars(state: PluginRegistryState) {
         source: record.source,
         message: `context engine id reserved by core: ${normalizedId}`,
       });
+      return;
+    }
+    const existingLocalOwner = registry.plugins.find((plugin) =>
+      plugin.contextEngineIds?.includes(normalizedId),
+    );
+    if (existingLocalOwner && existingLocalOwner.id !== record.id) {
+      pushDiagnostic({
+        level: "error",
+        pluginId: record.id,
+        source: record.source,
+        message: `context engine already registered: ${normalizedId} (plugin:${existingLocalOwner.id})`,
+      });
+      return;
+    }
+    if (registryParams.activateGlobalSideEffects === false) {
+      if (!record.contextEngineIds?.includes(normalizedId)) {
+        record.contextEngineIds = [...(record.contextEngineIds ?? []), normalizedId];
+      }
       return;
     }
     const result = registerContextEngineForOwner(normalizedId, factory, `plugin:${record.id}`, {
