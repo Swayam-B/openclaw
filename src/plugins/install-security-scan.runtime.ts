@@ -102,8 +102,11 @@ function resolveBeforeInstallHookRunner(params: {
     ) {
       return false;
     }
-    if (currentProvider.source) {
-      return path.resolve(plugin.source) === path.resolve(currentProvider.source);
+    if (
+      currentProvider.source &&
+      path.resolve(plugin.source) !== path.resolve(currentProvider.source)
+    ) {
+      return false;
     }
     return (
       plugin.rootDir !== undefined &&

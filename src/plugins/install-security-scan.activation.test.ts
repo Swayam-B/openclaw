@@ -914,6 +914,55 @@ describe("install hook provider activation", () => {
     expect(result?.blocked?.reason).toBe("current scanner source");
   });
 
+  it("loads the retargeted same-id scanner behind a configured symlink", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceDir = makeTempDir();
+    const scannerId = "retargeted-symlink-scanner";
+    const scannerA = writeLabeledBeforeInstallBlocker(
+      scannerId,
+      path.join(makeTempDir(), "scanner-a"),
+      "old symlink target",
+    );
+    const scannerB = writeLabeledBeforeInstallBlocker(
+      scannerId,
+      path.join(makeTempDir(), "scanner-b"),
+      "current symlink target",
+    );
+    const linkPath = path.join(makeTempDir(), "scanner-link");
+    fs.symlinkSync(scannerA.dir, linkPath, "dir");
+    const config = {
+      agents: { defaults: { workspace: workspaceDir } },
+      plugins: {
+        load: { paths: [linkPath] },
+      },
+    };
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () => {
+        ensurePluginRegistryLoaded({
+          config,
+          workspaceDir,
+          onlyPluginIds: [scannerId],
+        });
+        fs.unlinkSync(linkPath);
+        fs.symlinkSync(scannerB.dir, linkPath, "dir");
+        return await scanFileInstallSourceRuntime({
+          config,
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        });
+      },
+    );
+
+    expect(result?.blocked?.reason).toBe("current symlink target");
+  });
+
   it("fully loads a hook provider that is active only through a hookless setup runtime", async () => {
     useNoBundledPlugins();
     const stateDir = makeTempDir();
