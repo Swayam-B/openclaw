@@ -34,6 +34,27 @@ type ResolvedAnswer = {
   source: "explicit" | "default" | "absent";
 };
 
+export type ClawSetupAppliedAnswer = {
+  id: string;
+  value: Exclude<ResolvedAnswer["value"], undefined>;
+  source: Exclude<ResolvedAnswer["source"], "absent">;
+};
+
+export type ClawSetupRenderedSeed = {
+  destination: string;
+  content: Buffer;
+  digest: string;
+  inputIds: string[];
+  source: string;
+};
+
+export type ClawSetupMaterialization = {
+  schemaDigest: string;
+  answerDigest: string;
+  answers: ClawSetupAppliedAnswer[];
+  seeds: ClawSetupRenderedSeed[];
+};
+
 function diagnostic(
   code: string,
   phase: ClawDiagnostic["phase"],
@@ -85,6 +106,7 @@ function maxRenderedValueBytes(input: ClawSetupInput): number {
       return maxItems * (maxOptionBytes + 3);
     }
   }
+  throw new Error(`Unsupported setup input type: ${String((input as { type?: unknown }).type)}`);
 }
 
 function maxRenderedTemplateBytes(content: string, inputs: Map<string, ClawSetupInput>): number {
@@ -302,6 +324,7 @@ function validateAnswer(input: ClawSetupInput, value: unknown): string | undefin
       return undefined;
     }
   }
+  return "Unsupported setup input type.";
 }
 
 function escapeMarkdown(value: string): string {
@@ -329,9 +352,10 @@ export async function buildClawSetupPlan(params: {
   manifest: ClawManifestV2;
   packageRoot: string;
   answers?: unknown;
+  seedDestinations?: ReadonlySet<string>;
 }): Promise<{
   plan: ClawSetupPlan;
-  renderedSeeds: Array<{ destination: string; content: Buffer; source: string }>;
+  materialization?: ClawSetupMaterialization;
 }> {
   const read = await readClawSetupTemplates(params);
   const schemaDigest = digest(
@@ -357,9 +381,15 @@ export async function buildClawSetupPlan(params: {
         })),
         diagnostics: read.diagnostics,
       },
-      renderedSeeds: [],
     };
   }
+  const selectedDestinations = params.seedDestinations;
+  const selectedTemplates = selectedDestinations
+    ? read.templates.filter((template) => selectedDestinations.has(template.destination))
+    : read.templates;
+  const activeInputIds = new Set(
+    selectedTemplates.flatMap((template) => template.snapshot.inputIds),
+  );
 
   const diagnostics: ClawDiagnostic[] = [];
   const answers =
@@ -391,6 +421,10 @@ export async function buildClawSetupPlan(params: {
 
   const resolved = new Map<string, ResolvedAnswer>();
   for (const input of params.manifest.setup.inputs) {
+    if (!activeInputIds.has(input.id)) {
+      resolved.set(input.id, { value: undefined, source: "absent" });
+      continue;
+    }
     const explicit = answers ? Object.hasOwn(answers, input.id) : false;
     const value = explicit ? answers?.[input.id] : input.default;
     const source = explicit ? "explicit" : input.default !== undefined ? "default" : "absent";
@@ -424,13 +458,18 @@ export async function buildClawSetupPlan(params: {
 
   const answerDigest = digest(
     stableStringify(
-      params.manifest.setup.inputs.map((input) => ({ id: input.id, ...resolved.get(input.id)! })),
+      params.manifest.setup.inputs
+        .filter((input) => activeInputIds.has(input.id))
+        .map((input) => {
+          const answer = resolved.get(input.id)!;
+          return { id: input.id, value: answer.value, source: answer.source };
+        }),
     ),
   );
-  const renderedSeeds: Array<{ destination: string; content: Buffer; source: string }> = [];
+  const renderedSeeds: ClawSetupRenderedSeed[] = [];
   const seedPlans: ClawSetupPlan["seeds"] = [];
   let aggregateRenderedBytes = 0;
-  for (const template of read.templates) {
+  for (const template of selectedTemplates) {
     const rendered = template.content.replace(INPUT_TOKEN, (_token, inputId: string) =>
       renderAnswer(resolved.get(inputId) ?? { value: undefined, source: "absent" }),
     );
@@ -456,7 +495,13 @@ export async function buildClawSetupPlan(params: {
       blocked,
     });
     if (!blocked) {
-      renderedSeeds.push({ destination: template.destination, content, source: template.source });
+      renderedSeeds.push({
+        destination: template.destination,
+        content,
+        digest: digest(content),
+        inputIds: template.snapshot.inputIds,
+        source: template.source,
+      });
     }
   }
   if (aggregateRenderedBytes > MAX_CLAW_SETUP_RENDERED_BYTES) {
@@ -494,6 +539,23 @@ export async function buildClawSetupPlan(params: {
       seeds: seedPlans,
       diagnostics,
     },
-    renderedSeeds,
+    ...(diagnostics.length === 0
+      ? {
+          materialization: {
+            schemaDigest,
+            answerDigest,
+            answers: params.manifest.setup.inputs.flatMap((input) => {
+              if (!activeInputIds.has(input.id)) {
+                return [];
+              }
+              const answer = resolved.get(input.id);
+              return answer?.value !== undefined && answer.source !== "absent"
+                ? [{ id: input.id, value: answer.value, source: answer.source }]
+                : [];
+            }),
+            seeds: renderedSeeds,
+          },
+        }
+      : {}),
   };
 }

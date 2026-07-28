@@ -1,7 +1,5 @@
 // Builds read-only, agent-centric Claw update plans from grouped manifests and ownership state.
-import { createHash } from "node:crypto";
 import { lstat } from "node:fs/promises";
-import { stableStringify } from "../agents/stable-stringify.js";
 import { normalizeConfiguredMcpServers } from "../config/mcp-config-normalize.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { root as fsSafeRoot } from "../infra/fs-safe.js";
@@ -16,10 +14,8 @@ import { digestClawMcpServer, readClawMcpServerRefsByName } from "./mcp.js";
 import type { PackageRemovalDeps } from "./package-remove.js";
 import { digestClawPackageRef } from "./package-update-provenance.js";
 import { readClawPackageRefs } from "./provenance.js";
-import { clawSetupUpdateMutationUnavailableDiagnostic } from "./setup-mutation-guard.js";
 import {
   CLAW_OUTPUT_STABILITY,
-  CLAW_SETUP_SCHEMA_VERSION,
   type ClawDiagnostic,
   type ClawManifest,
   type ClawOpenClawProfile,
@@ -35,30 +31,24 @@ import {
   type ClawUpdateCapabilityChange,
 } from "./update-capability-changes.js";
 import { makeEmptyClawUpdatePlan } from "./update-plan-empty.js";
+import { buildClawUpdateSetupPlan } from "./update-plan-setup.js";
 import { summarizeClawUpdatePlan } from "./update-plan-summary.js";
 import {
   CLAW_UPDATE_PLAN_SCHEMA_VERSION,
   type ClawUpdateAction,
   type ClawUpdatePlan,
 } from "./update-plan-types.js";
+import {
+  clawUpdateDiagnostic as diagnostic,
+  digestClawUpdateValue as digest,
+  isManualClawUpdateState as manualState,
+} from "./update-plan-values.js";
 
 export {
   CLAW_UPDATE_PLAN_SCHEMA_VERSION,
   type ClawUpdateAction,
   type ClawUpdatePlan,
 } from "./update-plan-types.js";
-
-function digest(value: unknown): string {
-  return `sha256:${createHash("sha256").update(stableStringify(value)).digest("hex")}`;
-}
-
-function diagnostic(code: string, path: string, message: string): ClawDiagnostic {
-  return { level: "error", code, phase: "plan", path, message };
-}
-
-function manualState(state: string): boolean {
-  return state === "modified" || state === "unsafe" || state === "pending" || state === "failed";
-}
 
 export async function buildClawUpdatePlan(params: {
   agentId: string;
@@ -74,6 +64,7 @@ export async function buildClawUpdatePlan(params: {
     workspaceDir: string,
   ) => Promise<ClawPackagePreflightResult>;
   diagnostics?: ClawDiagnostic[];
+  answers?: unknown;
 }): Promise<ClawUpdatePlan> {
   const ownsDatabase = !params.stateOptions?.database;
   const database =
@@ -195,6 +186,7 @@ export async function buildClawUpdatePlan(params: {
       context: {
         agentId,
         workspace: record.install.workspace,
+        resumableWorkspace: record.install.workspace,
         packagePreflight: async (pkg) => {
           const result = params.packagePreflight
             ? await params.packagePreflight(pkg, record.install.workspace)
@@ -212,11 +204,9 @@ export async function buildClawUpdatePlan(params: {
       (entry) =>
         entry.code !== "workspace_collision" &&
         entry.code !== "agent_id_collision" &&
+        !entry.code.startsWith("setup_") &&
         !entry.path.startsWith("$.packages"),
     );
-    if (params.targetManifest.schemaVersion === CLAW_SETUP_SCHEMA_VERSION) {
-      blockers.push(clawSetupUpdateMutationUnavailableDiagnostic());
-    }
     const actions: ClawUpdateAction[] = [];
     const capabilityChanges: ClawUpdateCapabilityChange[] = [];
 
@@ -257,7 +247,10 @@ export async function buildClawUpdatePlan(params: {
 
     const targetFiles = new Map(
       targetPlan.actions
-        .filter((action) => action.kind === "workspaceFile")
+        .filter(
+          (action) =>
+            action.kind === "workspaceFile" && action.sourceKind !== "personalizationSeed",
+        )
         .map((action) => [action.id, action] as const),
     );
     const currentFiles = new Map(record.workspaceFiles.map((file) => [file.path, file] as const));
@@ -365,6 +358,10 @@ export async function buildClawUpdatePlan(params: {
         currentPresent: current.state !== "missing",
       });
     }
+
+    const setup = await buildClawUpdateSetupPlan(record, params);
+    actions.push(...setup.actions);
+    blockers.push(...setup.blockers);
 
     const allPackages = readClawPackageRefs(readOnlyStateOptions);
     const currentPackages = new Map(record.packages.map((pkg) => [packageKey(pkg), pkg] as const));
@@ -689,6 +686,7 @@ export async function buildClawUpdatePlan(params: {
         version: params.targetSource.version,
         integrity: params.targetSource.integrity,
       },
+      setup: setup.plan,
       summary: summarizeClawUpdatePlan(actions, capabilityChanges),
       actions,
       capabilityChanges,

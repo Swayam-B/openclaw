@@ -25,6 +25,7 @@ import {
   type PersistedClawMcpServerRef,
 } from "./mcp.js";
 import { ClawPackageInstallError, installClawPackages } from "./packages.js";
+import { ClawPersonalizationError, createClawPersonalizationSeeds } from "./personalization.js";
 import {
   deleteClawInstallRecord,
   persistClawInstallRecord,
@@ -33,7 +34,8 @@ import {
   type PersistedClawInstall,
   type PersistedClawPackageRef,
 } from "./provenance.js";
-import { CLAW_SETUP_ADD_MUTATION_UNAVAILABLE_MESSAGE } from "./setup-mutation-guard.js";
+import { completeClawInstallSetup, isResumableClawSetupAdd } from "./setup-state.js";
+import type { ClawSetupMaterialization } from "./setup.js";
 import { CLAW_OUTPUT_STABILITY, CLAW_SETUP_SCHEMA_VERSION, type ClawAddPlan } from "./types.js";
 import {
   ClawWorkspaceWriteError,
@@ -55,6 +57,9 @@ type ClawAddApplyOptions = OpenClawStateDatabaseOptions & {
   installPackages?: typeof installClawPackages;
   installMcpServers?: typeof installClawMcpServers;
   installCronJobs?: typeof installClawCronJobs;
+  setupMaterialization?: ClawSetupMaterialization;
+  createPersonalizationSeeds?: typeof createClawPersonalizationSeeds;
+  completeSetup?: typeof completeClawInstallSetup;
   cronGateway?: Pick<ClawCronGateway, "add" | "list" | "waitUntilAgentAvailable">;
   nowMs?: number;
 };
@@ -208,10 +213,10 @@ export async function applyClawAddPlan(
       "Consent does not match the current Claw add plan; run add --dry-run again.",
     );
   }
-  if (plan.manifestSchemaVersion === CLAW_SETUP_SCHEMA_VERSION) {
+  if (plan.manifestSchemaVersion === CLAW_SETUP_SCHEMA_VERSION && !options.setupMaterialization) {
     throw new ClawAddMutationError(
-      "setup_mutation_unavailable",
-      CLAW_SETUP_ADD_MUTATION_UNAVAILABLE_MESSAGE,
+      "setup_materialization_required",
+      "Schema version 2 Claw add requires the validated setup materialization from this plan.",
     );
   }
 
@@ -227,7 +232,9 @@ export async function applyClawAddPlan(
   let packages: PersistedClawPackageRef[] = [];
 
   const workspace = resolve(resolveUserPath(plan.agent.workspace));
-  const workspacePhaseRecorded = statusAtLeast(installRecord.status, "workspace_ready");
+  const setupResume = installRecord.status === "partial" && isResumableClawSetupAdd(plan, options);
+  const effectiveStatus = setupResume ? "config_committed" : installRecord.status;
+  const workspacePhaseRecorded = statusAtLeast(effectiveStatus, "workspace_ready");
   const workspaceState = workspacePhaseRecorded
     ? await lstat(workspace).catch((error: unknown) => {
         if (
@@ -248,7 +255,7 @@ export async function applyClawAddPlan(
     );
   }
   let workspaceCreated = workspaceState?.isDirectory() ?? false;
-  let configCommitted = statusAtLeast(installRecord.status, "config_committed");
+  let configCommitted = statusAtLeast(effectiveStatus, "config_committed");
 
   try {
     assertWorkspacePathUnchanged(workspace);
@@ -367,7 +374,7 @@ export async function applyClawAddPlan(
     markInstallStatus(
       plan.agent.finalId,
       "config_committed",
-      ["workspace_ready", "config_committed"],
+      setupResume ? ["partial", "config_committed"] : ["workspace_ready", "config_committed"],
       options,
     );
   } catch (error) {
@@ -529,8 +536,46 @@ export async function applyClawAddPlan(
     });
   }
 
+  let setupPending = false;
+  if (plan.manifestSchemaVersion === CLAW_SETUP_SCHEMA_VERSION) {
+    try {
+      await (options.createPersonalizationSeeds ?? createClawPersonalizationSeeds)(
+        plan,
+        options.setupMaterialization!,
+        options,
+      );
+      setupPending = true;
+    } catch (error) {
+      const setupError =
+        error instanceof ClawPersonalizationError
+          ? error
+          : new ClawPersonalizationError(
+              "setup_seed_failed",
+              error instanceof Error ? error.message : String(error),
+              [],
+            );
+      markInstallStatus(plan.agent.finalId, "partial", ["config_committed", "partial"], options);
+      return partialResult({
+        plan,
+        installRecord,
+        workspaceCreated,
+        configCommitted,
+        workspaceFiles,
+        packages,
+        mcpServers,
+        cronJobs,
+        error: { code: setupError.code, message: setupError.message },
+        nowMs: options.nowMs,
+      });
+    }
+  }
+
   try {
-    markInstallStatus(plan.agent.finalId, "complete", ["config_committed", "complete"], options);
+    if (setupPending) {
+      (options.completeSetup ?? completeClawInstallSetup)(plan.agent.finalId, options);
+    } else {
+      markInstallStatus(plan.agent.finalId, "complete", ["config_committed", "complete"], options);
+    }
     return {
       schemaVersion: CLAW_ADD_RESULT_SCHEMA_VERSION,
       stability: CLAW_OUTPUT_STABILITY,

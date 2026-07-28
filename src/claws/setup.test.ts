@@ -286,15 +286,17 @@ describe("Claw setup templates and plans", () => {
     });
 
     expect(first.plan.valid).toBe(true);
-    expect(first.renderedSeeds[0]?.content.toString("utf8")).toContain("Gio \\*admin\\*");
-    expect(first.renderedSeeds[0]?.content.toString("utf8")).toContain("- focus\n- follow\\_up");
+    expect(first.materialization?.seeds[0]?.content.toString("utf8")).toContain("Gio \\*admin\\*");
+    expect(first.materialization?.seeds[0]?.content.toString("utf8")).toContain(
+      "- focus\n- follow\\_up",
+    );
     expect(repeated.plan.answerDigest).toBe(first.plan.answerDigest);
     expect(repeated.plan.seeds[0]?.digest).toBe(first.plan.seeds[0]?.digest);
     expect(changed.plan.answerDigest).not.toBe(first.plan.answerDigest);
     expect(changed.plan.seeds[0]?.digest).not.toBe(first.plan.seeds[0]?.digest);
   });
 
-  it("plans personalized user-owned seeds but keeps version 2 mutation disabled", async () => {
+  it("requires the validated setup materialization before version 2 mutation", async () => {
     const root = await packageRoot();
     const plan = await buildClawAddPlan({
       manifest: manifest(),
@@ -303,9 +305,7 @@ describe("Claw setup templates and plans", () => {
       answers: { principal_name: "Gio", timezone: "UTC" },
     });
     const seed = plan.actions.find((action) => action.sourceKind === "personalizationSeed");
-    expect(plan.blockers).toContainEqual(
-      expect.objectContaining({ code: "setup_mutation_unavailable" }),
-    );
+    expect(plan.blockers).toEqual([]);
     expect(seed).toMatchObject({
       kind: "workspaceFile",
       id: "USER.md",
@@ -320,7 +320,9 @@ describe("Claw setup templates and plans", () => {
         consentPlanIntegrity: plan.planIntegrity,
         persistRecord,
       }),
-    ).rejects.toMatchObject<Partial<ClawAddMutationError>>({ code: "plan_blocked" });
+    ).rejects.toMatchObject<Partial<ClawAddMutationError>>({
+      code: "setup_materialization_required",
+    });
     expect(persistRecord).not.toHaveBeenCalled();
   });
 });

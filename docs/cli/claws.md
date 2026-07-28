@@ -97,9 +97,10 @@ on this page use JSON, with equivalent keys available in `CLAW.md` frontmatter.
 
 Schema version 2 adds declarative, non-secret setup inputs and seed-once
 personalization. Version 1 remains strict and rejects these fields. Version 2
-is currently available for inspection and dry-run planning only; mutation is
-enabled only after OpenClaw can persist setup state and hand generated files to
-the user safely.
+persists one current non-secret answer record and creates seed files only after
+an integrity-bound preview. Seed files become user-owned immediately: update
+and remove preserve them, while status and doctor report only their origin and
+handoff state.
 
 The OpenClaw package profile may select any built-in tool profile registered by
 the running OpenClaw version, then refine it with `alsoAllow`, `deny`, and
@@ -211,6 +212,9 @@ Answers are ordinary local personalization data, not credential storage. The
 plan returns field diagnostics, input and seed descriptors, rendered digests,
 and an answer-bound `planIntegrity` without returning answer values. Plugin and
 MCP credentials continue through their existing owner-specific setup paths.
+Successful add stores only the current applied answers; logs and ordinary add
+results do not echo their values. A different occupied seed destination blocks
+mutation. An interrupted exact write can be recovered from its recorded digest.
 
 Schema version 1 skills and plugins use exact ClawHub versions:
 
@@ -344,8 +348,33 @@ does not change the default workspace location.
 
 Adding a Claw creates the new agent and workspace configuration, writes declared
 workspace files, installs or reuses declared skill and plugin artifacts, and
-records package, MCP, and cron provenance. Existing files are not overwritten,
-and retries fail closed when owned content drifted.
+records package, MCP, cron, and setup provenance. Existing files are not
+overwritten, and retries fail closed when owned content drifted.
+
+## Configure personalization
+
+Changing answers alone does not mutate stored state or user files. Select an
+explicit seed effect, preview the exact current and desired digests, then apply
+the same plan:
+
+```bash
+openclaw claws configure executive-assistant \
+  --answers ./answers.json \
+  --regenerate USER.md \
+  --dry-run --json
+
+openclaw claws configure executive-assistant \
+  --answers ./answers.json \
+  --regenerate USER.md \
+  --yes \
+  --plan-integrity <SHA256_FROM_DRY_RUN>
+```
+
+Regeneration is an explicit replacement of user-owned content. OpenClaw binds
+consent to the current file digest and fails closed if that file changes after
+preview. A failed or uncertain write remains visible as partial setup state for
+status, doctor, retry, or removal; it does not replace the last successful
+answer record.
 
 ## Inspect installed state
 
@@ -356,9 +385,10 @@ openclaw doctor
 ```
 
 `status` compares the installed agent and its recorded workspace, package, MCP,
-and cron provenance with current state. It reports incomplete installs, missing
-resources, and drift without changing local state. `openclaw doctor` adds
-Claw-specific diagnostics for incomplete ownership records, unsafe managed
+cron, and setup provenance with current state. It reports incomplete installs,
+pending personalization reconciliation, missing resources, and managed drift
+without reading user-owned seed content. `openclaw doctor` adds Claw-specific
+diagnostics for incomplete ownership records, setup recovery, unsafe managed
 files, and cron jobs that cannot be corroborated with live Gateway inventory.
 
 Claw provenance distinguishes two relationships:
@@ -402,6 +432,14 @@ openclaw claws update incident-triage \
   --plan-integrity <SHA256_FROM_DRY_RUN>
 ```
 
+For schema version 2, pass `--answers` only when the update creates a new seed.
+Existing seed destinations remain user-owned even when their template, labels,
+defaults, or constraints change. New required answers block only a new seed
+that references them. A version 1-to-version 2 update can create absent seeds;
+an occupied or previously managed destination is an ownership conflict.
+Version 2-to-version 1 downgrade is unsupported; remove and add the older
+package instead.
+
 OpenClaw rebuilds the plan and compare-and-swaps owned state before each
 mutation. Removed package declarations release dependency edges without
 uninstalling artifacts. Cron changes reread the live scheduler definition and
@@ -428,7 +466,9 @@ Modified files and resources with another current owner are retained or
 blocked. Cleanup choices are part of the plan digest; `--yes` never broadens
 them. Globally installed plugins are retained while this Claw's reference is
 released; use the ordinary plugin lifecycle separately when you intend to
-uninstall a process-wide plugin.
+uninstall a process-wide plugin. Personalization seeds are listed as retained
+user-owned files. Their answer state is deleted only after root removal
+completes successfully.
 
 To remove unchanged Claw-introduced references that have no other current
 owner, include `--remove-unused` in both preview and apply. To select exact
@@ -467,6 +507,7 @@ credentials, sessions, and unowned local state are excluded.
 | `claws inspect <source>`            | Validate a package directory or grouped manifest.   |
 | `claws add <source>`                | Preview or create one new agent and workspace.      |
 | `claws status [claw-or-agent]`      | Report installed state, ownership, and drift.       |
+| `claws configure <claw-or-agent>`   | Preview or apply explicit personalization effects.  |
 | `claws update <claw-or-agent>`      | Preview or apply changes from the selected source.  |
 | `claws remove <claw-or-agent>`      | Preview or remove the agent and eligible resources. |
 | `claws export <agent> --out <path>` | Create a portable package from an installed agent.  |
