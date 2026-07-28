@@ -40,6 +40,8 @@ export type PluginLoadOptions = {
   preferSetupRuntimeForChannelPlugins?: boolean;
   /** Load channel runtime entries even when setup entries are available. */
   forceFullRuntimeForChannelPlugins?: boolean;
+  /** Expose the full runtime registration API without activating process-global side effects. */
+  forceFullRegistrationMode?: boolean;
   /** Prefer bundled JavaScript artifacts over source TypeScript entrypoints. */
   preferBuiltPluginArtifacts?: boolean;
   toolDiscovery?: boolean;

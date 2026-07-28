@@ -274,6 +274,7 @@ describe("ensurePluginRegistryLoaded", () => {
     expect(mocks.loadOpenClawPlugins).toHaveBeenCalledOnce();
     expect(loadOptions().activate).toBe(false);
     expect(loadOptions().cache).toBe(false);
+    expect(loadOptions().forceFullRegistrationMode).toBe(true);
     expect(loadOptions().forceFullRuntimeForChannelPlugins).toBe(true);
     expect(loadOptions().onlyPluginIds).toEqual(["demo"]);
     expect(loadOptions().throwOnLoadError).toBe(true);

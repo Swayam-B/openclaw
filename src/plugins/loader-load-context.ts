@@ -175,6 +175,7 @@ function buildCacheKey(params: {
   requireSetupEntryForSetupOnlyChannelPlugins?: boolean;
   preferSetupRuntimeForChannelPlugins?: boolean;
   forceFullRuntimeForChannelPlugins?: boolean;
+  forceFullRegistrationMode?: boolean;
   preferBuiltPluginArtifacts?: boolean;
   resolveRawConfigEnvVars?: boolean;
   toolDiscovery?: boolean;
@@ -220,6 +221,8 @@ function buildCacheKey(params: {
       : params.preferSetupRuntimeForChannelPlugins === true
         ? "prefer-setup"
         : "full";
+  const registrationMode =
+    params.forceFullRegistrationMode === true ? "force-full-registration" : "default-registration";
   const bundledArtifactMode =
     params.preferBuiltPluginArtifacts === true ? "prefer-built-artifacts" : "source-default";
   const rawConfigEnvMode =
@@ -235,7 +238,7 @@ function buildCacheKey(params: {
     installs,
     loadPaths,
     activationMetadataKey: params.activationMetadataKey ?? "",
-  })}::${serializePluginIdScope(params.onlyPluginIds)}::${setupOnlyKey}::${setupOnlyModeKey}::${setupOnlyRequirementKey}::${startupChannelMode}::${bundledArtifactMode}::${rawConfigEnvMode}::${moduleLoadMode}::${discoveryMode}::${params.runtimeSubagentMode ?? "default"}::${params.pluginSdkResolution ?? "auto"}::${JSON.stringify(params.coreGatewayMethodNames ?? [])}::${activationMode}`;
+  })}::${serializePluginIdScope(params.onlyPluginIds)}::${setupOnlyKey}::${setupOnlyModeKey}::${setupOnlyRequirementKey}::${startupChannelMode}::${registrationMode}::${bundledArtifactMode}::${rawConfigEnvMode}::${moduleLoadMode}::${discoveryMode}::${params.runtimeSubagentMode ?? "default"}::${params.pluginSdkResolution ?? "auto"}::${JSON.stringify(params.coreGatewayMethodNames ?? [])}::${activationMode}`;
 }
 
 export function resolveRuntimeSubagentMode(
@@ -344,6 +347,7 @@ export function resolvePluginLoadCacheContext(options: PluginLoadOptions = {}) {
     options.requireSetupEntryForSetupOnlyChannelPlugins === true;
   const preferSetupRuntimeForChannelPlugins = options.preferSetupRuntimeForChannelPlugins === true;
   const forceFullRuntimeForChannelPlugins = options.forceFullRuntimeForChannelPlugins === true;
+  const forceFullRegistrationMode = options.forceFullRegistrationMode === true;
   const preferBuiltPluginArtifacts = options.preferBuiltPluginArtifacts === true;
   const runtimeSubagentMode = resolveRuntimeSubagentMode(options.runtimeOptions);
   const coreGatewayMethodNames = resolveCoreGatewayMethodNames(options);
@@ -400,6 +404,7 @@ export function resolvePluginLoadCacheContext(options: PluginLoadOptions = {}) {
     requireSetupEntryForSetupOnlyChannelPlugins,
     preferSetupRuntimeForChannelPlugins,
     forceFullRuntimeForChannelPlugins,
+    forceFullRegistrationMode,
     preferBuiltPluginArtifacts,
     resolveRawConfigEnvVars: options.resolveRawConfigEnvVars,
     toolDiscovery: options.toolDiscovery,
@@ -423,6 +428,7 @@ export function resolvePluginLoadCacheContext(options: PluginLoadOptions = {}) {
     requireSetupEntryForSetupOnlyChannelPlugins,
     preferSetupRuntimeForChannelPlugins,
     forceFullRuntimeForChannelPlugins,
+    forceFullRegistrationMode,
     preferBuiltPluginArtifacts,
     shouldActivate: options.activate !== false,
     shouldLoadModules: options.loadModules !== false,

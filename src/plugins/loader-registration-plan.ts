@@ -30,6 +30,7 @@ export function resolvePluginRegistrationPlan(params: {
   env: NodeJS.ProcessEnv;
   preferSetupRuntimeForChannelPlugins: boolean;
   forceFullRuntimeForChannelPlugins: boolean;
+  forceFullRegistrationMode: boolean;
   toolDiscovery: boolean;
 }): PluginRegistrationPlan | null {
   if (params.canLoadScopedSetupOnlyChannelPlugin) {
@@ -81,7 +82,7 @@ export function resolvePluginRegistrationPlan(params: {
       runFullActivationOnlyRegistrations: false,
     };
   }
-  const mode = params.shouldActivate ? "full" : "discovery";
+  const mode = params.shouldActivate || params.forceFullRegistrationMode ? "full" : "discovery";
   return {
     mode,
     loadSetupEntry: false,

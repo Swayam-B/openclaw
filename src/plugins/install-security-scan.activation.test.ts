@@ -20,12 +20,17 @@ import { createEmptyPluginRegistry } from "./registry-empty.js";
 import { setActivePluginRegistry } from "./runtime.js";
 import { ensurePluginRegistryLoaded } from "./runtime/runtime-registry-loader.js";
 
-function writeBeforeInstallBlocker(id: string, dir?: string) {
+function writeBeforeInstallBlocker(
+  id: string,
+  dir?: string,
+  options: { fullRegistrationOnly?: boolean } = {},
+) {
   const plugin = writePlugin({
     id,
     ...(dir ? { dir } : {}),
     filename: dir ? "index.cjs" : `${id}.cjs`,
     body: `module.exports = { id: ${JSON.stringify(id)}, register(api) {
+      ${options.fullRegistrationOnly ? 'if (api.registrationMode !== "full") return;' : ""}
       api.on("before_install", (event) => ({
         block: true,
         blockReason: "blocked staged target " + event.targetName,
@@ -93,6 +98,35 @@ describe("install hook provider activation", () => {
         reason: "blocked staged target payload",
       },
     });
+  });
+
+  it("loads a hook provider that registers only in full runtime mode", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const scanner = writeBeforeInstallBlocker("full-mode-scanner", undefined, {
+      fullRegistrationOnly: true,
+    });
+    const config = {
+      plugins: {
+        load: { paths: [scanner.file] },
+      },
+    };
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () =>
+        await scanFileInstallSourceRuntime({
+          config,
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        }),
+    );
+
+    expect(result?.blocked?.reason).toBe("blocked staged target payload");
   });
 
   it("does not execute a staged plugin as its own first-install scanner", async () => {
