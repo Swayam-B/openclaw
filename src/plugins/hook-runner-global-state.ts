@@ -258,3 +258,15 @@ export function getGlobalHookRunnerRegistry(): TrustedPolicyHookRunnerRegistry |
   const state = getHookRunnerGlobalState();
   return state.registry ? createComposedHookRegistryFacade(state) : null;
 }
+
+/** Returns an explicitly initialized SDK registry that is not a live runtime registry. */
+export function getIsolatedGlobalHookRunnerRegistry(): TrustedPolicyHookRunnerRegistry | null {
+  const registry = getHookRunnerGlobalState().registry;
+  if (!registry) {
+    return null;
+  }
+  if (collectLivePluginRegistries().some((liveRegistry) => liveRegistry === registry)) {
+    return null;
+  }
+  return isPluginRegistryRetired(registry as PluginRegistry) ? null : registry;
+}

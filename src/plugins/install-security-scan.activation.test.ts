@@ -8,6 +8,8 @@ import {
 import { withEnvAsync } from "../test-utils/env.js";
 import { listPluginCommands } from "./commands.js";
 import { resetGlobalHookRunner } from "./hook-runner-global.js";
+import { initializeGlobalHookRunner } from "./hook-runner-global.js";
+import { createMockPluginRegistry } from "./hooks.test-fixtures.js";
 import {
   evaluateSkillInstallPolicyRuntime,
   scanBundleInstallSourceRuntime,
@@ -566,6 +568,41 @@ describe("install hook provider activation", () => {
     );
 
     expect(result).toBeUndefined();
+  });
+
+  it("preserves an explicitly initialized SDK install gate beside an active registry", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceDir = makeTempDir();
+    const sdkRegistry = createMockPluginRegistry([
+      {
+        hookName: "before_install",
+        pluginId: "sdk-install-gate",
+        handler: () => ({
+          block: true,
+          blockReason: "SDK install gate",
+        }),
+      },
+    ]);
+    sdkRegistry.hooks = [];
+    setActivePluginRegistry(createEmptyPluginRegistry(), "active", "default", workspaceDir);
+    initializeGlobalHookRunner(sdkRegistry);
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () =>
+        await scanFileInstallSourceRuntime({
+          config: { agents: { defaults: { workspace: workspaceDir } } },
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        }),
+    );
+
+    expect(result?.blocked?.reason).toBe("SDK install gate");
   });
 
   it("uses the target active scanner instead of a same-id pinned scanner", async () => {

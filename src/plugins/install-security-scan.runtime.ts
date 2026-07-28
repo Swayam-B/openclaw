@@ -28,7 +28,10 @@ import {
 } from "./dependency-denylist.js";
 import { resolveExplicitEffectivePluginIds } from "./effective-plugin-ids.js";
 import type { GlobalHookRunnerRegistry } from "./hook-registry.types.js";
-import { getGlobalHookRunnerRegistry } from "./hook-runner-global-state.js";
+import {
+  getGlobalHookRunnerRegistry,
+  getIsolatedGlobalHookRunnerRegistry,
+} from "./hook-runner-global-state.js";
 import { getGlobalHookRunner } from "./hook-runner-global.js";
 import { createHookRunner, type HookRunner } from "./hooks.js";
 import { createBeforeInstallHookPayload } from "./install-policy-context.js";
@@ -81,8 +84,13 @@ function resolveBeforeInstallHookRunner(params: {
       path.resolve(registryWorkspaceDir) === path.resolve(params.workspaceDir)
     );
   });
+  const isolatedGlobalRegistry = getIsolatedGlobalHookRunnerRegistry();
+  const registrySources: GlobalHookRunnerRegistry[] = [
+    ...(isolatedGlobalRegistry ? [isolatedGlobalRegistry] : []),
+    ...matchingLiveRegistries,
+  ];
   const hookOwnerByPluginId = new Map<string, GlobalHookRunnerRegistry>();
-  for (const registry of matchingLiveRegistries) {
+  for (const registry of registrySources) {
     const providerIds = new Set([
       ...registry.typedHooks.map((hook) => normalizePluginPolicyId(hook.pluginId)),
       ...registry.hooks.map((hook) => normalizePluginPolicyId(hook.pluginId)),
@@ -107,21 +115,21 @@ function resolveBeforeInstallHookRunner(params: {
     }
   }
   const globalRegistry: GlobalHookRunnerRegistry | null =
-    matchingLiveRegistries.length > 0
+    registrySources.length > 0
       ? {
-          hooks: matchingLiveRegistries.flatMap((registry) =>
+          hooks: registrySources.flatMap((registry) =>
             registry.hooks.filter(
               (hook) =>
                 hookOwnerByPluginId.get(normalizePluginPolicyId(hook.pluginId)) === registry,
             ),
           ),
-          typedHooks: matchingLiveRegistries.flatMap((registry) =>
+          typedHooks: registrySources.flatMap((registry) =>
             registry.typedHooks.filter(
               (hook) =>
                 hookOwnerByPluginId.get(normalizePluginPolicyId(hook.pluginId)) === registry,
             ),
           ),
-          plugins: matchingLiveRegistries.flatMap((registry) =>
+          plugins: registrySources.flatMap((registry) =>
             registry.plugins.filter(
               (plugin) => hookOwnerByPluginId.get(normalizePluginPolicyId(plugin.id)) === registry,
             ),
