@@ -435,9 +435,12 @@ describe("scenario-flow-runner", () => {
         },
       }),
     ).rejects.toThrow("persisted user turns");
-  it("accepts a fanout parent reply emitted before runAgentPrompt returns", async () => {
+  });
+
+  it("uses agent history when fanout transport evidence does not match", async () => {
     const state = createQaBusState();
-    let lateWaitCalls = 0;
+    let transportWaitCalls = 0;
+    let historyWaitCalls = 0;
     const sessionKey = "agent:qa:fanout:1:00000000";
     const result = await runLoadedScenarioFlow("subagent-fanout-synthesis", {
       state,
@@ -453,13 +456,26 @@ describe("scenario-flow-runner", () => {
           state.addOutboundMessage({
             accountId: "qa-channel",
             to: "dm:qa-operator",
-            text: "subagent-1: ok\nsubagent-2: ok",
+            text: "transport observer saw a different delivery surface",
           });
           return { started: { runId: "fanout-run" }, waited: { status: "ok" } };
         },
         waitForOutboundMessage: async () => {
-          lateWaitCalls += 1;
-          throw new Error("late outbound waiter should not be armed after the reply exists");
+          transportWaitCalls += 1;
+          throw new Error("fanout parent evidence must not use QA transport state");
+        },
+        waitForAgentHistoryReply: async (
+          _env: unknown,
+          requestedSessionKey: string,
+          predicate: (text: string) => boolean,
+          timeoutMs: number,
+        ) => {
+          historyWaitCalls += 1;
+          expect(requestedSessionKey).toBe(sessionKey);
+          expect(timeoutMs).toBe(30_000);
+          const text = "subagent-1: ok\nsubagent-2: ok";
+          expect(predicate(text)).toBe(true);
+          return { text };
         },
         readRawQaSessionStore: async () => ({
           "agent:qa:subagent:alpha": {
@@ -488,7 +504,8 @@ describe("scenario-flow-runner", () => {
     });
 
     expect(result).toMatchObject({ status: "pass" });
-    expect(lateWaitCalls).toBe(0);
+    expect(historyWaitCalls).toBe(1);
+    expect(transportWaitCalls).toBe(0);
   });
 
   it.each([
