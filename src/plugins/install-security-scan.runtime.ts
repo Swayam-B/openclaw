@@ -37,6 +37,7 @@ import { createHookRunner, type HookRunner } from "./hooks.js";
 import { createBeforeInstallHookPayload } from "./install-policy-context.js";
 import type { InstallSafetyOverrides } from "./install-security-scan.types.js";
 import { readPersistedInstalledPluginIndexSync } from "./installed-plugin-index-store.js";
+import type { InstalledPluginIndex } from "./installed-plugin-index.js";
 import { normalizePluginPolicyId } from "./plugin-policy-id.js";
 import { loadPluginRegistrySnapshot } from "./plugin-registry-snapshot.js";
 import {
@@ -56,6 +57,7 @@ function resolveBeforeInstallHookRunner(params: {
   disableAllPlugins: boolean;
   disabledPluginIds: ReadonlySet<string>;
   hookProviderIds: readonly string[];
+  index: InstalledPluginIndex;
   logger: InstallScanLogger;
   workspaceDir: string;
 }): HookRunner | null {
@@ -160,6 +162,7 @@ function resolveBeforeInstallHookRunner(params: {
     hookProviderIdsToLoad.length > 0
       ? loadIsolatedPluginRegistry({
           config: params.config,
+          index: params.index,
           workspaceDir: params.workspaceDir,
           onlyPluginIds: hookProviderIdsToLoad,
         })
@@ -919,7 +922,11 @@ async function runBeforeInstallHook(params: {
     const config = params.config ?? {};
     const workspaceDir =
       params.workspaceDir ?? resolveAgentWorkspaceDir(config, resolveDefaultAgentId(config));
-    const pluginIndex = loadPluginRegistrySnapshot({ config, workspaceDir });
+    const pluginIndex = loadPluginRegistrySnapshot({
+      config,
+      workspaceDir,
+      preferPersisted: false,
+    });
     const isBlockingProviderDiagnostic = (diagnostic: {
       level: "warn" | "error";
       message: string;
@@ -1034,22 +1041,24 @@ async function runBeforeInstallHook(params: {
         config,
         workspaceDir,
         onlyPluginIds: explicitlyEnabledPluginIds,
+        preferPersisted: false,
         requireExplicitManifestOwnerTrust: true,
         trigger: {
           kind: "hook",
           hook: "before_install",
         },
       });
-      const hookProviderCandidateIds = new Set(
+      const hookProviderIdByNormalizedId = new Map(
         [...pluginIndex.plugins, ...recoveredHookProviderRecords]
           .filter((plugin) => plugin.startup?.activationHooks?.includes("before_install") === true)
-          .map((plugin) => normalizePluginPolicyId(plugin.pluginId)),
+          .map((plugin) => [normalizePluginPolicyId(plugin.pluginId), plugin.pluginId]),
       );
       for (const entry of activationPlan.entries) {
         if (entry.reasons.includes("activation-hook-hint")) {
-          hookProviderCandidateIds.add(normalizePluginPolicyId(entry.pluginId));
+          hookProviderIdByNormalizedId.set(normalizePluginPolicyId(entry.pluginId), entry.pluginId);
         }
       }
+      const hookProviderCandidateIds = new Set(hookProviderIdByNormalizedId.keys());
       const activationErrors = [
         ...new Map(
           [
@@ -1087,9 +1096,10 @@ async function runBeforeInstallHook(params: {
             .join("; ")}`,
         );
       }
-      hookProviderIds = activationPlan.entries
-        .filter((entry) => entry.reasons.includes("activation-hook-hint"))
-        .map((entry) => entry.pluginId);
+      hookProviderIds = [...hookProviderIdByNormalizedId]
+        .filter(([pluginId]) => explicitlyEnabledPluginIdSet.has(pluginId))
+        .map(([, pluginId]) => pluginId)
+        .toSorted((left, right) => left.localeCompare(right));
     }
     const normalizedPlugins = normalizePluginsConfig(config.plugins);
     const disabledPluginIds = new Set([
@@ -1110,6 +1120,7 @@ async function runBeforeInstallHook(params: {
       disableAllPlugins: !normalizedPlugins.enabled,
       disabledPluginIds,
       hookProviderIds,
+      index: pluginIndex,
       logger: params.logger,
       workspaceDir,
     });

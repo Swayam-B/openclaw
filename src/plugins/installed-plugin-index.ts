@@ -41,6 +41,7 @@ export { diffInstalledPluginIndexInvalidationReasons } from "./installed-plugin-
 export {
   hasMissingCapabilityActivationMetadata,
   hasMissingConfigPathActivationMetadata,
+  hasMissingHookActivationMetadata,
 } from "./installed-plugin-index-config-path-scope.js";
 export { resolveInstalledPluginIndexPolicyHash } from "./installed-plugin-index-policy.js";
 

@@ -12,6 +12,7 @@ import { createSubsystemLogger } from "../../logging.js";
 import { resolvePluginActivationSourceConfig } from "../activation-source-config.js";
 import { setCurrentPluginMetadataSnapshot } from "../current-plugin-metadata-snapshot.js";
 import { extractPluginInstallRecordsFromInstalledPluginIndex } from "../installed-plugin-index-install-records.js";
+import type { InstalledPluginIndex } from "../installed-plugin-index.js";
 import type { PluginLoadOptions } from "../loader.js";
 import type { PluginManifestRegistry } from "../manifest-registry.js";
 import { registerPluginMetadataProcessMemoLifecycleClear } from "../plugin-metadata-lifecycle.js";
@@ -138,6 +139,7 @@ type PluginRuntimeLoadContextOptions = {
   config?: OpenClawConfig;
   activationSourceConfig?: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
+  index?: InstalledPluginIndex;
   workspaceDir?: string;
   onlyPluginIds?: readonly string[];
   logger?: PluginLogger;
@@ -167,6 +169,7 @@ export function resolvePluginRuntimeLoadContext(
       ? resolvePluginMetadataSnapshot({
           config: rawConfig,
           env,
+          ...(options?.index ? { index: options.index } : {}),
           workspaceDir: rawWorkspaceDir,
           allowWorkspaceScopedCurrent: true,
           ...(options?.onlyPluginIds !== undefined ? { pluginIds: options.onlyPluginIds } : {}),

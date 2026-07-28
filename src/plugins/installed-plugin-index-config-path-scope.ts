@@ -31,6 +31,11 @@ export function hasMissingCapabilityActivationMetadata(index: InstalledPluginInd
   );
 }
 
+/** True when an index predates dedicated hook activation metadata. */
+export function hasMissingHookActivationMetadata(index: InstalledPluginIndex): boolean {
+  return index.plugins.some((plugin) => plugin.startup.activationHooks === undefined);
+}
+
 /** True when a record migrated config-path activation startup metadata. */
 export function hasConfigPathActivationMetadataMigration(params: {
   previous: InstalledPluginIndexRecord;
@@ -52,5 +57,16 @@ export function hasCapabilityActivationMetadataMigration(params: {
     recordUsesCapabilityActivation(params.previous) &&
     params.previous.startup.activationCapabilities === undefined &&
     params.current.startup.activationCapabilities !== undefined
+  );
+}
+
+/** True when a record migrated dedicated hook activation startup metadata. */
+export function hasHookActivationMetadataMigration(params: {
+  previous: InstalledPluginIndexRecord;
+  current: InstalledPluginIndexRecord;
+}): boolean {
+  return (
+    params.previous.startup.activationHooks === undefined &&
+    params.current.startup.activationHooks !== undefined
   );
 }

@@ -1037,6 +1037,39 @@ describe("installed plugin index", () => {
     expect(diffInstalledPluginIndexInvalidationReasons(previous, current)).toEqual(["migration"]);
   });
 
+  it("treats legacy hook startup metadata as migration invalidation", () => {
+    const fixture = createRichPluginFixture();
+    writePluginManifest(fixture.rootDir, {
+      id: "demo",
+      name: "Demo",
+      configSchema: { type: "object" },
+      activation: {
+        onHooks: ["before_install"],
+      },
+    });
+    const current = loadInstalledPluginIndex({
+      candidates: [fixture.candidate],
+      env: hermeticEnv(),
+    });
+    const previous = {
+      ...current,
+      plugins: current.plugins.map((plugin) => ({
+        ...plugin,
+        startup: {
+          sidecar: plugin.startup.sidecar,
+          memory: plugin.startup.memory,
+          deferConfiguredChannelFullLoadUntilAfterListen:
+            plugin.startup.deferConfiguredChannelFullLoadUntilAfterListen,
+          agentHarnesses: plugin.startup.agentHarnesses,
+          configPaths: plugin.startup.configPaths,
+          activationCapabilities: plugin.startup.activationCapabilities,
+        },
+      })),
+    };
+
+    expect(diffInstalledPluginIndexInvalidationReasons(previous, current)).toEqual(["migration"]);
+  });
+
   it("does not mark enabled-only migration snapshots stale for omitted disabled plugins", () => {
     const enabledFixture = createRichPluginFixture();
     const disabledFixture = createRichPluginFixture();

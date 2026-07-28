@@ -21,6 +21,7 @@ import {
   extractPluginInstallRecordsFromInstalledPluginIndex,
   hasMissingCapabilityActivationMetadata,
   hasMissingConfigPathActivationMetadata,
+  hasMissingHookActivationMetadata,
   INSTALLED_PLUGIN_INDEX_WARNING,
   INSTALLED_PLUGIN_INDEX_VERSION,
   INSTALLED_PLUGIN_INDEX_MIGRATION_VERSION,
@@ -428,7 +429,8 @@ function canRefreshPersistedPolicyState(
     persisted.compatRegistryVersion !== resolveCompatRegistryVersion() ||
     persisted.migrationVersion !== INSTALLED_PLUGIN_INDEX_MIGRATION_VERSION ||
     hasMissingConfigPathActivationMetadata(persisted) ||
-    hasMissingCapabilityActivationMetadata(persisted)
+    hasMissingCapabilityActivationMetadata(persisted) ||
+    hasMissingHookActivationMetadata(persisted)
   ) {
     return false;
   }

@@ -15,6 +15,7 @@ import {
   scanBundleInstallSourceRuntime,
   scanFileInstallSourceRuntime,
 } from "./install-security-scan.runtime.js";
+import { refreshPersistedInstalledPluginIndex } from "./installed-plugin-index-store.js";
 import {
   cleanupPluginLoaderFixturesForTest,
   makeTempDir,
@@ -22,6 +23,7 @@ import {
   useNoBundledPlugins,
   writePlugin,
 } from "./loader.test-fixtures.js";
+import { loadPluginRegistrySnapshot } from "./plugin-registry-snapshot.js";
 import { createEmptyPluginRegistry } from "./registry-empty.js";
 import {
   collectLivePluginRegistries,
@@ -434,6 +436,59 @@ describe("install hook provider activation", () => {
         reason: "blocked staged target payload",
       },
     });
+  });
+
+  it("does not reuse another workspace's persisted registry for an install scan", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const firstWorkspaceDir = makeTempDir();
+    const targetWorkspaceDir = makeTempDir();
+    const scanner = writeBeforeInstallBlocker(
+      "target-workspace-scanner",
+      path.join(targetWorkspaceDir, ".openclaw", "extensions", "target-workspace-scanner"),
+    );
+    const config = {
+      plugins: {
+        allow: [scanner.id],
+        entries: {
+          [scanner.id]: { enabled: true },
+        },
+      },
+    };
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () => {
+        await refreshPersistedInstalledPluginIndex({
+          reason: "manual",
+          config,
+          workspaceDir: firstWorkspaceDir,
+          stateDir,
+          env: process.env,
+        });
+        resetPluginLoaderTestStateForTest();
+        const targetSnapshot = loadPluginRegistrySnapshot({
+          config,
+          workspaceDir: targetWorkspaceDir,
+          preferPersisted: false,
+        });
+        expect(targetSnapshot.plugins.map((plugin) => plugin.pluginId)).toContain(scanner.id);
+        return await evaluateSkillInstallPolicyRuntime({
+          config,
+          workspaceDir: targetWorkspaceDir,
+          installId: "node",
+          logger: {},
+          origin: { type: "workspace" },
+          skillName: "payload",
+          sourceDir: makeTempDir(),
+        });
+      },
+    );
+
+    expect(result?.blocked?.reason).toBe("blocked staged target payload");
   });
 
   it("preserves active plugin commands while activating a lazy hook provider", async () => {

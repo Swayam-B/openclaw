@@ -348,6 +348,7 @@ describe("legacy file install scan compatibility", () => {
       config,
       workspaceDir: expect.any(String),
       onlyPluginIds: ["scanner-a", "scanner-b"],
+      preferPersisted: false,
       requireExplicitManifestOwnerTrust: true,
       trigger: {
         kind: "hook",
@@ -356,6 +357,7 @@ describe("legacy file install scan compatibility", () => {
     });
     expect(loadIsolatedPluginRegistryMock).toHaveBeenCalledWith({
       config,
+      index: { diagnostics: [], plugins: [] },
       workspaceDir: expect.any(String),
       onlyPluginIds: ["scanner-a", "scanner-b"],
     });
@@ -399,6 +401,12 @@ describe("legacy file install scan compatibility", () => {
 
     expect(loadIsolatedPluginRegistryMock).toHaveBeenCalledWith({
       config,
+      index: {
+        plugins: [
+          { enabled: true, origin: "config", pluginId: "command-plugin" },
+          { enabled: true, origin: "config", pluginId: "scanner" },
+        ],
+      },
       workspaceDir: expect.any(String),
       onlyPluginIds: ["scanner"],
     });
@@ -1085,6 +1093,12 @@ describe("legacy file install scan compatibility", () => {
     );
     expect(loadIsolatedPluginRegistryMock).toHaveBeenCalledWith({
       config,
+      index: {
+        plugins: [
+          { enabled: true, origin: "global", pluginId: "Scanner-X" },
+          { enabled: true, origin: "config", pluginId: "Local-Scanner" },
+        ],
+      },
       workspaceDir: expect.any(String),
       onlyPluginIds: ["Local-Scanner", "Scanner-X"],
     });

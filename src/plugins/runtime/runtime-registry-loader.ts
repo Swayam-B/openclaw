@@ -11,6 +11,7 @@ import {
   resolveDiscoverableScopedChannelPluginIds,
 } from "../channel-plugin-ids.js";
 import { resolveEffectivePluginIds } from "../effective-plugin-ids.js";
+import type { InstalledPluginIndex } from "../installed-plugin-index.js";
 import { loadOpenClawPlugins } from "../loader.js";
 import {
   hasExplicitPluginIdScope,
@@ -232,6 +233,7 @@ export function ensurePluginRegistryLoaded(options?: {
 export function loadIsolatedPluginRegistry(options: {
   config?: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
+  index?: InstalledPluginIndex;
   workspaceDir?: string;
   onlyPluginIds: string[];
 }): PluginRegistry {

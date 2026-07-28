@@ -2,6 +2,7 @@
 import {
   hasCapabilityActivationMetadataMigration,
   hasConfigPathActivationMetadataMigration,
+  hasHookActivationMetadataMigration,
 } from "./installed-plugin-index-config-path-scope.js";
 import { hashJson } from "./installed-plugin-index-hash.js";
 import type {
@@ -57,6 +58,10 @@ export function diffInstalledPluginIndexInvalidationReasons(
         current: currentPlugin,
       }) ||
       hasCapabilityActivationMetadataMigration({
+        previous: previousPlugin,
+        current: currentPlugin,
+      }) ||
+      hasHookActivationMetadataMigration({
         previous: previousPlugin,
         current: currentPlugin,
       })

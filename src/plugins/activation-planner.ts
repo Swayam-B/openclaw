@@ -71,6 +71,7 @@ type ResolveManifestActivationPlanParams = {
   origin?: PluginOrigin;
   onlyPluginIds?: readonly string[];
   manifestRecords?: readonly PluginManifestRecord[];
+  preferPersisted?: boolean;
   allowRestrictiveAllowlistBypass?: boolean;
   requireExplicitManifestOwnerTrust?: boolean;
 };
@@ -88,6 +89,7 @@ export function resolveManifestActivationPlan(
         env: params.env,
         pluginIds: params.onlyPluginIds,
         includeDisabled: true,
+        preferPersisted: params.preferPersisted,
       });
   const normalizedConfig = normalizePluginsConfig(params.config?.plugins);
   const entries = registry.plugins

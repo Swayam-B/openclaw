@@ -54,6 +54,7 @@ function createIndex(overrides: Partial<InstalledPluginIndex> = {}): InstalledPl
           memory: false,
           deferConfiguredChannelFullLoadUntilAfterListen: false,
           agentHarnesses: [],
+          activationHooks: [],
         },
         compat: [],
       },
@@ -157,6 +158,8 @@ function dropStartupConfigPaths(
       deferConfiguredChannelFullLoadUntilAfterListen:
         plugin.startup.deferConfiguredChannelFullLoadUntilAfterListen,
       agentHarnesses: plugin.startup.agentHarnesses,
+      activationCapabilities: plugin.startup.activationCapabilities,
+      activationHooks: plugin.startup.activationHooks,
     },
   };
 }
@@ -173,6 +176,24 @@ function dropStartupActivationCapabilities(
         plugin.startup.deferConfiguredChannelFullLoadUntilAfterListen,
       agentHarnesses: plugin.startup.agentHarnesses,
       configPaths: plugin.startup.configPaths,
+      activationHooks: plugin.startup.activationHooks,
+    },
+  };
+}
+
+function dropStartupActivationHooks(
+  plugin: InstalledPluginIndex["plugins"][number],
+): InstalledPluginIndex["plugins"][number] {
+  return {
+    ...plugin,
+    startup: {
+      sidecar: plugin.startup.sidecar,
+      memory: plugin.startup.memory,
+      deferConfiguredChannelFullLoadUntilAfterListen:
+        plugin.startup.deferConfiguredChannelFullLoadUntilAfterListen,
+      agentHarnesses: plugin.startup.agentHarnesses,
+      configPaths: plugin.startup.configPaths,
+      activationCapabilities: plugin.startup.activationCapabilities,
     },
   };
 }
@@ -487,6 +508,50 @@ describe("installed plugin index persistence", () => {
       },
     });
 
+    expect(refreshed.plugins[0]?.startup.activationHooks).toEqual(["before_install"]);
+    const persisted = requirePersisted(await readPersistedInstalledPluginIndex({ stateDir }));
+    expect(persisted.plugins[0]?.startup.activationHooks).toEqual(["before_install"]);
+  });
+
+  it("marks indexes without hook activation metadata stale so update rebuilds them", async () => {
+    const stateDir = makeTempDir();
+    const pluginDir = path.join(stateDir, "plugins", "scanner");
+    fs.mkdirSync(pluginDir, { recursive: true });
+    const env = {
+      OPENCLAW_BUNDLED_PLUGINS_DIR: undefined,
+      OPENCLAW_VERSION: "2026.4.25",
+      VITEST: "true",
+    };
+    const candidate = createCandidate(pluginDir, {
+      id: "scanner",
+      activationHooks: ["before_install"],
+    });
+    const current = await refreshPersistedInstalledPluginIndex({
+      reason: "manual",
+      stateDir,
+      candidates: [candidate],
+      env,
+    });
+    const legacy = {
+      ...current,
+      plugins: current.plugins.map(dropStartupActivationHooks),
+    };
+    await writePersistedInstalledPluginIndex(legacy, { stateDir });
+
+    const inspection = await inspectPersistedInstalledPluginIndex({
+      stateDir,
+      candidates: [candidate],
+      env,
+    });
+    expect(inspection.state).toBe("stale");
+    expect(inspection.refreshReasons).toEqual(["migration"]);
+
+    const refreshed = await refreshPersistedInstalledPluginIndex({
+      reason: "policy-changed",
+      stateDir,
+      candidates: [candidate],
+      env,
+    });
     expect(refreshed.plugins[0]?.startup.activationHooks).toEqual(["before_install"]);
     const persisted = requirePersisted(await readPersistedInstalledPluginIndex({ stateDir }));
     expect(persisted.plugins[0]?.startup.activationHooks).toEqual(["before_install"]);

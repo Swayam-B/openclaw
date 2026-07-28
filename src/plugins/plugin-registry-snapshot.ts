@@ -27,6 +27,7 @@ import {
   extractPluginInstallRecordsFromInstalledPluginIndex,
   hasMissingCapabilityActivationMetadata,
   hasMissingConfigPathActivationMetadata,
+  hasMissingHookActivationMetadata,
   isInstalledPluginEnabled,
   loadInstalledPluginIndexWithDiscovery,
   resolveInstalledPluginIndexPolicyHash,
@@ -525,7 +526,8 @@ export function loadPluginRegistrySnapshotWithMetadata(
         });
       } else if (
         hasMissingConfigPathActivationMetadata(persistedIndex) ||
-        hasMissingCapabilityActivationMetadata(persistedIndex)
+        hasMissingCapabilityActivationMetadata(persistedIndex) ||
+        hasMissingHookActivationMetadata(persistedIndex)
       ) {
         diagnostics.push({
           level: "warn",

@@ -52,6 +52,7 @@ function writePackagePlugin(
   rootDir: string,
   options: {
     activationCapabilities?: readonly string[];
+    activationHooks?: readonly string[];
     configPaths?: readonly string[];
     pluginId?: string;
     requiresPlugins?: readonly string[];
@@ -67,13 +68,14 @@ function writePackagePlugin(
       name: pluginId,
       description: "one",
       configSchema: { type: "object" },
-      ...(options.configPaths || options.activationCapabilities
+      ...(options.configPaths || options.activationCapabilities || options.activationHooks
         ? {
             activation: {
               ...(options.configPaths ? { onConfigPaths: options.configPaths } : {}),
               ...(options.activationCapabilities
                 ? { onCapabilities: options.activationCapabilities }
                 : {}),
+              ...(options.activationHooks ? { onHooks: options.activationHooks } : {}),
             },
           }
         : {}),
@@ -222,6 +224,8 @@ function dropStartupConfigPaths(
       deferConfiguredChannelFullLoadUntilAfterListen:
         plugin.startup.deferConfiguredChannelFullLoadUntilAfterListen,
       agentHarnesses: plugin.startup.agentHarnesses,
+      activationCapabilities: plugin.startup.activationCapabilities,
+      activationHooks: plugin.startup.activationHooks,
     },
   };
 }
@@ -238,6 +242,24 @@ function dropStartupActivationCapabilities(
         plugin.startup.deferConfiguredChannelFullLoadUntilAfterListen,
       agentHarnesses: plugin.startup.agentHarnesses,
       configPaths: plugin.startup.configPaths,
+      activationHooks: plugin.startup.activationHooks,
+    },
+  };
+}
+
+function dropStartupActivationHooks(
+  plugin: InstalledPluginIndex["plugins"][number],
+): InstalledPluginIndex["plugins"][number] {
+  return {
+    ...plugin,
+    startup: {
+      sidecar: plugin.startup.sidecar,
+      memory: plugin.startup.memory,
+      deferConfiguredChannelFullLoadUntilAfterListen:
+        plugin.startup.deferConfiguredChannelFullLoadUntilAfterListen,
+      agentHarnesses: plugin.startup.agentHarnesses,
+      configPaths: plugin.startup.configPaths,
+      activationCapabilities: plugin.startup.activationCapabilities,
     },
   };
 }
@@ -768,7 +790,9 @@ describe("loadPluginRegistrySnapshotWithMetadata", () => {
     writePackagePlugin(firstRoot, { pluginId: "duplicate" });
     writePackagePlugin(secondRoot, { pluginId: "duplicate" });
     const originalIndex = loadInstalledPluginIndex({ config: originalConfig, env });
-    expect(originalIndex.plugins.map((plugin) => plugin.rootDir)).toEqual([firstRoot]);
+    expect(originalIndex.plugins.map((plugin) => plugin.rootDir)).toEqual([
+      fs.realpathSync(firstRoot),
+    ]);
     writePersistedInstalledPluginIndexSync(originalIndex, { stateDir });
 
     const unchanged = loadPluginRegistrySnapshotWithMetadata({
@@ -785,7 +809,9 @@ describe("loadPluginRegistrySnapshotWithMetadata", () => {
     });
     expect(reordered.source).toBe("derived");
     expectDiagnosticsContainCode(reordered.diagnostics, "persisted-registry-stale-source");
-    expect(reordered.snapshot.plugins.map((plugin) => plugin.rootDir)).toEqual([secondRoot]);
+    expect(reordered.snapshot.plugins.map((plugin) => plugin.rootDir)).toEqual([
+      fs.realpathSync(secondRoot),
+    ]);
   });
 
   it("rebuilds legacy config-path persisted registries before startup scoping", () => {
@@ -844,6 +870,35 @@ describe("loadPluginRegistrySnapshotWithMetadata", () => {
     expect(result.source).toBe("derived");
     expectDiagnosticsContainCode(result.diagnostics, "persisted-registry-stale-source");
     expect(result.snapshot.plugins[0]?.startup.activationCapabilities).toEqual(["hook"]);
+  });
+
+  it("rebuilds persisted registries missing dedicated hook activation metadata", () => {
+    const tempRoot = makeTempDir();
+    const rootDir = path.join(tempRoot, "workspace");
+    const stateDir = path.join(tempRoot, "state");
+    const env = { ...createHermeticEnv(tempRoot), OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1" };
+    const config = {
+      plugins: {
+        load: { paths: [rootDir] },
+      },
+    };
+    writePackagePlugin(rootDir, { activationHooks: ["before_install"] });
+    const index = loadInstalledPluginIndex({ config, env });
+    const legacyIndex: InstalledPluginIndex = {
+      ...index,
+      plugins: index.plugins.map(dropStartupActivationHooks),
+    };
+    writePersistedInstalledPluginIndexSync(legacyIndex, { stateDir });
+
+    const result = loadPluginRegistrySnapshotWithMetadata({
+      config,
+      env,
+      stateDir,
+    });
+
+    expect(result.source).toBe("derived");
+    expectDiagnosticsContainCode(result.diagnostics, "persisted-registry-stale-source");
+    expect(result.snapshot.plugins[0]?.startup.activationHooks).toEqual(["before_install"]);
   });
 
   it("keeps persisted package plugins with dot-prefixed package metadata paths", () => {
