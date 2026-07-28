@@ -22,7 +22,9 @@ import {
 } from "./loader.test-fixtures.js";
 import { createEmptyPluginRegistry } from "./registry-empty.js";
 import {
+  collectLivePluginRegistries,
   getActivePluginRegistry,
+  getPluginRegistryWorkspaceDir,
   pinActivePluginChannelRegistry,
   setActivePluginRegistry,
 } from "./runtime.js";
@@ -88,7 +90,12 @@ function writeStatefulBeforeInstallBlocker(id: string) {
   return plugin;
 }
 
-function writeLabeledBeforeInstallBlocker(id: string, dir: string, label: string) {
+function writeLabeledBeforeInstallBlocker(
+  id: string,
+  dir: string,
+  label: string,
+  options: { activationHint?: boolean } = {},
+) {
   const plugin = writePlugin({
     id,
     dir,
@@ -102,7 +109,9 @@ function writeLabeledBeforeInstallBlocker(id: string, dir: string, label: string
   });
   const manifestPath = path.join(plugin.dir, "openclaw.plugin.json");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
-  manifest.activation = { onCapabilities: ["hook"] };
+  if (options.activationHint !== false) {
+    manifest.activation = { onCapabilities: ["hook"] };
+  }
   fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
   return plugin;
 }
@@ -618,6 +627,60 @@ describe("install hook provider activation", () => {
     );
 
     expect(result?.blocked?.reason).toBe("active workspace B scanner");
+  });
+
+  it("keeps a same-workspace pinned scanner during a scoped active swap", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceDir = makeTempDir();
+    const scanner = writeLabeledBeforeInstallBlocker(
+      "legacy-pinned-scanner",
+      path.join(workspaceDir, ".openclaw", "extensions", "legacy-pinned-scanner"),
+      "same-workspace pinned scanner",
+      { activationHint: false },
+    );
+    const config = {
+      plugins: {
+        allow: [scanner.id],
+        entries: {
+          [scanner.id]: { enabled: true },
+        },
+      },
+    };
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () => {
+        ensurePluginRegistryLoaded({
+          config,
+          workspaceDir,
+          onlyPluginIds: [scanner.id],
+        });
+        const startupRegistry = getActivePluginRegistry();
+        if (!startupRegistry) {
+          throw new Error("expected startup plugin registry");
+        }
+        expect(startupRegistry.typedHooks.map((hook) => hook.hookName)).toContain("before_install");
+        expect(getPluginRegistryWorkspaceDir(startupRegistry)).toBe(workspaceDir);
+        pinActivePluginChannelRegistry(startupRegistry);
+        setActivePluginRegistry(createEmptyPluginRegistry(), "scoped", "default", workspaceDir);
+        expect(collectLivePluginRegistries()).toContain(startupRegistry);
+        return await evaluateSkillInstallPolicyRuntime({
+          config,
+          workspaceDir,
+          installId: "node",
+          logger: {},
+          origin: { type: "workspace" },
+          skillName: "payload",
+          sourceDir: makeTempDir(),
+        });
+      },
+    );
+
+    expect(result?.blocked?.reason).toBe("same-workspace pinned scanner");
   });
 
   it("stops dispatching a hook provider after it is disabled", async () => {

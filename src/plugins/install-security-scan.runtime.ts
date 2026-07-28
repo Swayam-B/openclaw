@@ -36,7 +36,11 @@ import type { InstallSafetyOverrides } from "./install-security-scan.types.js";
 import { readPersistedInstalledPluginIndexSync } from "./installed-plugin-index-store.js";
 import { normalizePluginPolicyId } from "./plugin-policy-id.js";
 import { loadPluginRegistrySnapshot } from "./plugin-registry-snapshot.js";
-import { getActivePluginRegistry, getActivePluginRegistryWorkspaceDir } from "./runtime.js";
+import {
+  collectLivePluginRegistries,
+  getActivePluginRegistry,
+  getPluginRegistryWorkspaceDir,
+} from "./runtime.js";
 import { loadIsolatedPluginRegistry } from "./runtime/runtime-registry-loader.js";
 
 type InstallScanLogger = {
@@ -70,16 +74,62 @@ function resolveBeforeInstallHookRunner(params: {
   ) {
     return getGlobalHookRunner();
   }
-  const activeRegistryWorkspaceDir = getActivePluginRegistryWorkspaceDir();
-  const activeRegistryMatchesTarget =
-    activeRegistry !== null &&
-    activeRegistryWorkspaceDir !== undefined &&
-    path.resolve(activeRegistryWorkspaceDir) === path.resolve(params.workspaceDir);
-  const globalRegistry = activeRegistryMatchesTarget
-    ? activeRegistry
-    : activeRegistry
-      ? null
-      : getGlobalHookRunnerRegistry();
+  const matchingLiveRegistries = collectLivePluginRegistries().filter((registry) => {
+    const registryWorkspaceDir = getPluginRegistryWorkspaceDir(registry);
+    return (
+      registryWorkspaceDir !== undefined &&
+      path.resolve(registryWorkspaceDir) === path.resolve(params.workspaceDir)
+    );
+  });
+  const hookOwnerByPluginId = new Map<string, GlobalHookRunnerRegistry>();
+  for (const registry of matchingLiveRegistries) {
+    const providerIds = new Set([
+      ...registry.typedHooks.map((hook) => normalizePluginPolicyId(hook.pluginId)),
+      ...registry.hooks.map((hook) => normalizePluginPolicyId(hook.pluginId)),
+    ]);
+    for (const plugin of registry.plugins) {
+      const pluginId = normalizePluginPolicyId(plugin.id);
+      if (
+        plugin.status === "loaded" &&
+        providerIds.has(pluginId) &&
+        !hookOwnerByPluginId.has(pluginId)
+      ) {
+        hookOwnerByPluginId.set(pluginId, registry);
+      }
+    }
+    for (const pluginId of providerIds) {
+      if (
+        !hookOwnerByPluginId.has(pluginId) &&
+        !registry.plugins.some((plugin) => normalizePluginPolicyId(plugin.id) === pluginId)
+      ) {
+        hookOwnerByPluginId.set(pluginId, registry);
+      }
+    }
+  }
+  const globalRegistry: GlobalHookRunnerRegistry | null =
+    matchingLiveRegistries.length > 0
+      ? {
+          hooks: matchingLiveRegistries.flatMap((registry) =>
+            registry.hooks.filter(
+              (hook) =>
+                hookOwnerByPluginId.get(normalizePluginPolicyId(hook.pluginId)) === registry,
+            ),
+          ),
+          typedHooks: matchingLiveRegistries.flatMap((registry) =>
+            registry.typedHooks.filter(
+              (hook) =>
+                hookOwnerByPluginId.get(normalizePluginPolicyId(hook.pluginId)) === registry,
+            ),
+          ),
+          plugins: matchingLiveRegistries.flatMap((registry) =>
+            registry.plugins.filter(
+              (plugin) => hookOwnerByPluginId.get(normalizePluginPolicyId(plugin.id)) === registry,
+            ),
+          ),
+        }
+      : activeRegistry
+        ? null
+        : getGlobalHookRunnerRegistry();
   const loadedGlobalPluginIds = new Set(
     globalRegistry?.plugins
       .filter((plugin) => plugin.status === "loaded")
@@ -854,24 +904,59 @@ async function runBeforeInstallHook(params: {
         : null;
     const diagnosticMatchesRecord = (
       diagnostic: (typeof currentErrorDiagnostics)[number],
-      plugin: NonNullable<typeof persistedPluginIndex>["plugins"][number],
+      plugin: {
+        pluginId: string;
+        manifestPath: string;
+        rootDir: string;
+        source?: string;
+        setupSource?: string;
+      },
     ) => {
-      if (
-        diagnostic.pluginId &&
+      if (diagnostic.source !== undefined) {
+        const diagnosticSource = path.resolve(diagnostic.source);
+        return [plugin.manifestPath, plugin.rootDir, plugin.source, plugin.setupSource].some(
+          (recordPath) => recordPath !== undefined && path.resolve(recordPath) === diagnosticSource,
+        );
+      }
+      return (
+        diagnostic.pluginId !== undefined &&
         normalizePluginPolicyId(diagnostic.pluginId) === normalizePluginPolicyId(plugin.pluginId)
-      ) {
-        return true;
-      }
-      if (diagnostic.source === undefined) {
-        return false;
-      }
-      const diagnosticSource = path.resolve(diagnostic.source);
-      return [plugin.manifestPath, plugin.rootDir, plugin.source, plugin.setupSource].some(
-        (recordPath) => recordPath !== undefined && path.resolve(recordPath) === diagnosticSource,
       );
+    };
+    const recordsShareSource = (
+      left: {
+        manifestPath?: string;
+        rootDir?: string;
+        source?: string;
+        setupSource?: string;
+      },
+      right: {
+        manifestPath?: string;
+        rootDir?: string;
+        source?: string;
+        setupSource?: string;
+      },
+    ) => {
+      const leftPaths = [left.manifestPath, left.rootDir, left.source, left.setupSource]
+        .filter((value): value is string => value !== undefined)
+        .map((value) => path.resolve(value));
+      const rightPaths = new Set(
+        [right.manifestPath, right.rootDir, right.source, right.setupSource]
+          .filter((value): value is string => value !== undefined)
+          .map((value) => path.resolve(value)),
+      );
+      return leftPaths.some((value) => rightPaths.has(value));
     };
     const recoverableHookProviderRecords =
       persistedPluginIndex?.plugins.filter((plugin) => {
+        const selectedPlugin = pluginIndex.plugins.find(
+          (candidate) =>
+            normalizePluginPolicyId(candidate.pluginId) ===
+            normalizePluginPolicyId(plugin.pluginId),
+        );
+        if (selectedPlugin && !recordsShareSource(selectedPlugin, plugin)) {
+          return false;
+        }
         if (
           !currentErrorDiagnostics.some((diagnostic) => diagnosticMatchesRecord(diagnostic, plugin))
         ) {
@@ -934,14 +1019,24 @@ async function runBeforeInstallHook(params: {
             ...currentErrorDiagnostics,
             ...activationPlan.diagnostics.filter((diagnostic) => diagnostic.level === "error"),
           ]
-            .filter(
-              (diagnostic) =>
-                (diagnostic.pluginId !== undefined &&
-                  hookProviderCandidateIds.has(normalizePluginPolicyId(diagnostic.pluginId))) ||
+            .filter((diagnostic) => {
+              const diagnosticPluginId = diagnostic.pluginId
+                ? normalizePluginPolicyId(diagnostic.pluginId)
+                : undefined;
+              const selectedPlugin = diagnosticPluginId
+                ? pluginIndex.plugins.find(
+                    (plugin) => normalizePluginPolicyId(plugin.pluginId) === diagnosticPluginId,
+                  )
+                : undefined;
+              return (
+                (diagnosticPluginId !== undefined &&
+                  hookProviderCandidateIds.has(diagnosticPluginId) &&
+                  (!selectedPlugin || diagnosticMatchesRecord(diagnostic, selectedPlugin))) ||
                 recoveredHookProviderRecords.some((plugin) =>
                   diagnosticMatchesRecord(diagnostic, plugin),
-                ),
-            )
+                )
+              );
+            })
             .map((diagnostic) => [
               `${diagnostic.pluginId ?? ""}\0${diagnostic.source ?? ""}\0${diagnostic.message}`,
               diagnostic,

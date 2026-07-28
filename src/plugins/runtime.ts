@@ -1,6 +1,7 @@
 // Coordinates active plugin runtime registries and event hooks.
 import { onAgentEvent } from "../infra/agent-events.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import {
   clearPluginHostRuntimeState,
   dispatchPluginAgentEventSubscriptions,
@@ -18,6 +19,10 @@ import {
 } from "./runtime-state.js";
 
 const log = createSubsystemLogger("plugins/runtime");
+const registryWorkspaceDirs = resolveGlobalSingleton<WeakMap<PluginRegistry, string | undefined>>(
+  Symbol.for("openclaw.pluginRegistryWorkspaceDirs"),
+  () => new WeakMap(),
+);
 
 function asPluginRegistry(registry: RegistryState["activeRegistry"]): PluginRegistry | null {
   return registry;
@@ -204,6 +209,7 @@ export function setActivePluginRegistry(
 ) {
   const previousRegistry = asPluginRegistry(state.activeRegistry);
   state.activeRegistry = registry;
+  registryWorkspaceDirs.set(registry, workspaceDir);
   markPluginRegistryActive(registry);
   state.activeVersion += 1;
   syncTrackedSurface(state.httpRoute, registry, true);
@@ -232,6 +238,10 @@ export function getActivePluginRegistry(): PluginRegistry | null {
 
 export function getActivePluginRegistryWorkspaceDir(): string | undefined {
   return state.workspaceDir ?? undefined;
+}
+
+export function getPluginRegistryWorkspaceDir(registry: PluginRegistry): string | undefined {
+  return registryWorkspaceDirs.get(registry);
 }
 
 export function requireActivePluginRegistry(): PluginRegistry {

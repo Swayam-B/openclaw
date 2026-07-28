@@ -10,6 +10,8 @@ const getGlobalHookRunnerMock = vi.fn();
 const getGlobalHookRunnerRegistryMock = vi.fn();
 const getActivePluginRegistryMock = vi.fn();
 const getActivePluginRegistryWorkspaceDirMock = vi.fn();
+const collectLivePluginRegistriesMock = vi.fn();
+const getPluginRegistryWorkspaceDirMock = vi.fn();
 const createHookRunnerMock = vi.fn();
 const resolveManifestActivationPlanMock = vi.fn();
 const loadPluginRegistrySnapshotMock = vi.fn();
@@ -50,8 +52,10 @@ vi.mock("./hook-runner-global-state.js", () => ({
 }));
 
 vi.mock("./runtime.js", () => ({
+  collectLivePluginRegistries: () => collectLivePluginRegistriesMock(),
   getActivePluginRegistry: () => getActivePluginRegistryMock(),
   getActivePluginRegistryWorkspaceDir: () => getActivePluginRegistryWorkspaceDirMock(),
+  getPluginRegistryWorkspaceDir: (...args: unknown[]) => getPluginRegistryWorkspaceDirMock(...args),
 }));
 
 vi.mock("./hooks.js", () => ({
@@ -106,6 +110,10 @@ beforeEach(() => {
   getActivePluginRegistryMock.mockReturnValue(null);
   getActivePluginRegistryWorkspaceDirMock.mockReset();
   getActivePluginRegistryWorkspaceDirMock.mockReturnValue(undefined);
+  collectLivePluginRegistriesMock.mockReset();
+  collectLivePluginRegistriesMock.mockReturnValue([]);
+  getPluginRegistryWorkspaceDirMock.mockReset();
+  getPluginRegistryWorkspaceDirMock.mockReturnValue(undefined);
   createHookRunnerMock.mockReset();
   createHookRunnerMock.mockImplementation(() => getGlobalHookRunnerMock());
   resolveManifestActivationPlanMock.mockReset();
@@ -665,6 +673,76 @@ describe("legacy file install scan compatibility", () => {
       },
     });
     expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
+  });
+
+  it("ignores a broken persisted scanner source shadowed by a valid override", async () => {
+    const persistedRoot = "/plugins/installed-scanner";
+    const overrideRoot = "/plugins/config-scanner";
+    loadPluginRegistrySnapshotMock.mockReturnValue({
+      diagnostics: [
+        {
+          level: "error",
+          message: "installed scanner manifest could not be parsed",
+          pluginId: "scanner",
+          source: `${persistedRoot}/openclaw.plugin.json`,
+        },
+      ],
+      plugins: [
+        {
+          enabled: true,
+          manifestPath: `${overrideRoot}/openclaw.plugin.json`,
+          origin: "config",
+          pluginId: "scanner",
+          rootDir: overrideRoot,
+          startup: { activationCapabilities: ["hook"] },
+        },
+      ],
+    });
+    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
+      plugins: [
+        {
+          compat: ["activation-capability-hint"],
+          enabled: true,
+          manifestPath: `${persistedRoot}/openclaw.plugin.json`,
+          origin: "global",
+          pluginId: "scanner",
+          rootDir: persistedRoot,
+          startup: { activationCapabilities: ["hook"] },
+        },
+      ],
+    });
+    resolveManifestActivationPlanMock.mockReturnValue({
+      diagnostics: [],
+      entries: [
+        {
+          origin: "config",
+          pluginId: "scanner",
+          reasons: ["activation-capability-hint"],
+        },
+      ],
+      pluginIds: ["scanner"],
+      trigger: { kind: "capability", capability: "hook" },
+    });
+
+    await expect(
+      scanFileInstallSourceRuntime({
+        config: {
+          plugins: {
+            allow: ["scanner"],
+            load: { paths: [overrideRoot] },
+          },
+        },
+        filePath: "/tmp/payload.js",
+        logger: {},
+        pluginId: "payload",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(loadIsolatedPluginRegistryMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onlyPluginIds: ["scanner"],
+      }),
+    );
   });
 
   it("does not recover a malformed scanner after current config disables it", async () => {
