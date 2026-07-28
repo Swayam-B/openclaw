@@ -55,7 +55,9 @@ export const AGENT_FIELD_HELP: Record<string, string> = {
   "plugins.entries.*.llm.allowModelOverride":
     "Explicitly allows this plugin to request model overrides in api.runtime.llm.complete. Keep false unless the plugin is trusted to steer model selection.",
   "plugins.entries.*.llm.allowedModels":
-    'Allowed override targets for trusted plugin LLM completions as canonical "provider/model" refs. Use "*" only when you intentionally allow any model.',
+    'Allowed models for plugin LLM completions as canonical "provider/model" refs, including the resolved default. Use "*" only when you intentionally allow any model.',
+  "plugins.entries.*.llm.allowAuthProfileOverride":
+    "Explicitly allows this plugin to select a non-default auth profile in api.runtime.llm.complete. Keep false unless the plugin is trusted for explicit credential routing.",
   "plugins.entries.*.llm.allowAgentIdOverride":
     "Explicitly allows this plugin to request api.runtime.llm.complete against a non-default agent id. Keep false unless the plugin is trusted for cross-agent model access.",
   "plugins.entries.*.apiKey":

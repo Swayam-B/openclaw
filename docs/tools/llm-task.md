@@ -47,11 +47,15 @@ allowlist mode instead.
     "entries": {
       "llm-task": {
         "enabled": true,
+        "llm": {
+          "allowModelOverride": true,
+          "allowedModels": ["openai/gpt-5.6-sol"],
+          "allowAuthProfileOverride": true
+        },
         "config": {
           "defaultProvider": "openai",
           "defaultModel": "gpt-5.6-sol",
           "defaultAuthProfileId": "main",
-          "allowedModels": ["openai/gpt-5.6-sol"],
           "maxTokens": 800,
           "timeoutMs": 30000
         }
@@ -61,9 +65,15 @@ allowlist mode instead.
 }
 ```
 
-`allowedModels` is an allowlist of `provider/model` strings; a request for any
-other model is rejected. All other keys are per-call fallbacks used when the
-tool call omits that parameter.
+The `llm` block is host-owned authorization. `allowedModels` restricts every
+completion, so include the resolved agent default as well as any override targets.
+`allowAuthProfileOverride` permits `defaultAuthProfileId` and the per-call
+`authProfileId` parameter. The `config` keys are selection defaults used when a
+tool call omits the corresponding parameter.
+
+Run `openclaw doctor --fix` once for llm-task entries created by older releases.
+Doctor grants the shipped model/profile selection permissions and moves any
+legacy `config.allowedModels` value into the host policy without widening it.
 
 ## Tool parameters
 

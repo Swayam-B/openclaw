@@ -150,12 +150,6 @@ export function createPluginRuntimeMock(overrides: DeepPartial<PluginRuntime> = 
     payloads: [],
     meta: {},
   }) as unknown as PluginRuntime["agent"]["runEmbeddedAgent"];
-  const runIsolatedCompletionMock = vi.fn().mockResolvedValue({
-    text: "{}",
-    provider: DEFAULT_PROVIDER,
-    model: DEFAULT_MODEL,
-    owner: { kind: "harness", id: "openclaw" },
-  }) as unknown as PluginRuntime["agent"]["runIsolatedCompletion"];
   const taskFlow = {
     bindSession: vi.fn(
       createTaskFlowSessionMock,
@@ -534,7 +528,6 @@ export function createPluginRuntimeMock(overrides: DeepPartial<PluginRuntime> = 
           { id: "high", label: "high" },
         ],
       })) as unknown as PluginRuntime["agent"]["resolveThinkingPolicy"],
-      runIsolatedCompletion: runIsolatedCompletionMock,
       runEmbeddedAgent: runEmbeddedAgentMock,
       runEmbeddedPiAgent: runEmbeddedAgentMock,
       resolveAgentTimeoutMs: vi.fn(
@@ -987,7 +980,18 @@ export function createPluginRuntimeMock(overrides: DeepPartial<PluginRuntime> = 
     },
     llm: {
       acquireLocalService: vi.fn(),
-      complete: vi.fn(),
+      complete: vi.fn().mockResolvedValue({
+        text: "{}",
+        provider: DEFAULT_PROVIDER,
+        model: DEFAULT_MODEL,
+        agentId: "main",
+        usage: {},
+        execution: {
+          mode: "direct-provider",
+          owner: { kind: "provider", id: DEFAULT_PROVIDER },
+        },
+        audit: { caller: { kind: "plugin", id: "test" } },
+      }),
     },
     nodes: {
       list: vi.fn(async () => ({ nodes: [] })),

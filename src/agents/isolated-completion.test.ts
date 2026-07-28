@@ -124,6 +124,7 @@ describe("runIsolatedCompletion", () => {
       provider: "openai",
       model: "gpt-test",
       owner: { kind: "harness", id: "codex" },
+      usage: expect.objectContaining({ input: 1, output: 1, totalTokens: 2 }),
     });
     expect(mocks.prepareSimpleCompletionModel).toHaveBeenCalledWith(
       expect.objectContaining({ profileId: undefined, bindAuthOwner: true }),
@@ -209,6 +210,7 @@ describe("runIsolatedCompletion", () => {
       provider: "openai",
       model: "gpt-5.6-sol-actual",
       owner: { kind: "harness", id: "codex" },
+      usage: expect.objectContaining({ input: 1, output: 1, totalTokens: 2 }),
     });
   });
 

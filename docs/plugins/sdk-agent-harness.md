@@ -167,6 +167,10 @@ content with a `stop` or `length` stop reason; tool calls, failed stops, and emp
 output are rejected. If the harness cannot prove these semantics, omit the capability.
 Callers that require isolated completion then fail closed before invoking that
 harness; OpenClaw does not replay the request through another runtime.
+Plugin callers select this behavior through
+`api.runtime.llm.complete({ execution: { mode: "isolated-agent-runtime" } })`;
+the harness callback is the provider-side enforcement SPI, not a second caller
+API.
 
 Native agent servers often have ambient built-in tools even when OpenClaw sends
 an empty tool list. In that case, use a separate provider transport that can

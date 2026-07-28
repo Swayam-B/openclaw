@@ -55,7 +55,21 @@ export type IsolatedCompletionResult = {
   provider: string;
   model: string;
   owner: { kind: "cli" | "harness"; id: string };
+  /** CLI runtimes may not report token usage; absence must not be projected as zero. */
+  usage?: AssistantMessage["usage"];
 };
+
+export type IsolatedCompletionErrorCode = "unsupported" | "runtime-unavailable" | "output-rejected";
+
+export class IsolatedCompletionError extends Error {
+  readonly code: IsolatedCompletionErrorCode;
+
+  constructor(code: IsolatedCompletionErrorCode, message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "IsolatedCompletionError";
+    this.code = code;
+  }
+}
 
 type AgentHarnessIsolatedCompletionParams = Parameters<
   NonNullable<AgentHarness["runIsolatedCompletion"]>
@@ -63,7 +77,10 @@ type AgentHarnessIsolatedCompletionParams = Parameters<
 
 function requireIsolatedAssistantText(assistant: AssistantMessage): string {
   if (assistant.stopReason !== "stop" && assistant.stopReason !== "length") {
-    throw new Error(`Isolated completion failed with stop reason ${assistant.stopReason}.`);
+    throw new IsolatedCompletionError(
+      "output-rejected",
+      `Isolated completion failed with stop reason ${assistant.stopReason}.`,
+    );
   }
   const textParts: string[] = [];
   for (const block of assistant.content) {
@@ -74,11 +91,17 @@ function requireIsolatedAssistantText(assistant: AssistantMessage): string {
     if (block.type === "thinking") {
       continue;
     }
-    throw new Error("Isolated completion returned a tool call; the result was rejected.");
+    throw new IsolatedCompletionError(
+      "output-rejected",
+      "Isolated completion returned a tool call; the result was rejected.",
+    );
   }
   const text = textParts.join("").trim();
   if (!text) {
-    throw new Error("Isolated completion returned empty output.");
+    throw new IsolatedCompletionError(
+      "output-rejected",
+      "Isolated completion returned empty output.",
+    );
   }
   return text;
 }
@@ -149,7 +172,10 @@ async function runCliIsolatedCompletion(params: {
         isolatedCompletion: true,
       });
       if (hasCliSideEffectEvidence(result)) {
-        throw new Error("Isolated CLI completion returned side-effect evidence; result rejected.");
+        throw new IsolatedCompletionError(
+          "output-rejected",
+          "Isolated CLI completion returned side-effect evidence; result rejected.",
+        );
       }
       const payloads = result.payloads ?? [];
       if (
@@ -162,7 +188,10 @@ async function runCliIsolatedCompletion(params: {
             payload.channelData,
         )
       ) {
-        throw new Error("Isolated CLI completion returned non-text output; result rejected.");
+        throw new IsolatedCompletionError(
+          "output-rejected",
+          "Isolated CLI completion returned non-text output; result rejected.",
+        );
       }
       const text = payloads
         .filter((payload) => !payload.isReasoning && typeof payload.text === "string")
@@ -170,13 +199,19 @@ async function runCliIsolatedCompletion(params: {
         .join("\n")
         .trim();
       if (!text) {
-        throw new Error("Isolated CLI completion returned empty output.");
+        throw new IsolatedCompletionError(
+          "output-rejected",
+          "Isolated CLI completion returned empty output.",
+        );
       }
       const backend = resolveCliBackendConfig(params.provider, params.request.config, {
         agentId: params.agentId,
       });
       if (!backend) {
-        throw new Error(`CLI backend ${params.provider} became unavailable after execution.`);
+        throw new IsolatedCompletionError(
+          "runtime-unavailable",
+          `CLI backend ${params.provider} became unavailable after execution.`,
+        );
       }
       return { text, model: normalizeCliModel(params.request.model, backend.config) };
     },
@@ -232,7 +267,10 @@ async function resolveHarness(runtime: string): Promise<AgentHarness> {
   }
   const harness = getRegisteredAgentHarness(runtime)?.harness;
   if (!harness) {
-    throw new Error(`Agent harness ${runtime} is unavailable for isolated completion.`);
+    throw new IsolatedCompletionError(
+      "runtime-unavailable",
+      `Agent harness ${runtime} is unavailable for isolated completion.`,
+    );
   }
   return harness;
 }
@@ -315,7 +353,10 @@ export async function runIsolatedCompletion(
 
   const harness = await resolveHarness(runtime);
   if (!harness.runIsolatedCompletion) {
-    throw new Error(`Agent harness ${harness.id} does not support isolated completion.`);
+    throw new IsolatedCompletionError(
+      "unsupported",
+      `Agent harness ${harness.id} does not support isolated completion.`,
+    );
   }
   const prepared = await prepareSimpleCompletionModel({
     cfg: config,
@@ -359,5 +400,6 @@ export async function runIsolatedCompletion(
     provider: result.assistant.provider,
     model: result.assistant.model,
     owner: { kind: "harness", id: harness.id },
+    usage: result.assistant.usage,
   };
 }

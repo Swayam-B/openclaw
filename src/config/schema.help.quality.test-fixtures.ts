@@ -306,6 +306,7 @@ export const TARGET_KEYS = [
   "plugins.entries.*.llm",
   "plugins.entries.*.llm.allowModelOverride",
   "plugins.entries.*.llm.allowedModels",
+  "plugins.entries.*.llm.allowAuthProfileOverride",
   "plugins.entries.*.llm.allowAgentIdOverride",
   "plugins.entries.*.apiKey",
   "plugins.entries.*.env",

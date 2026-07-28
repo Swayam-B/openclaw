@@ -2,6 +2,7 @@
 import { parseModelCatalogRef } from "@openclaw/model-catalog-core/model-catalog-refs";
 import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { splitTrailingAuthProfile } from "../../agents/model-ref-profile.js";
 import { modelKey } from "../../agents/model-ref-shared.js";
 import { normalizeModelRef } from "../../agents/model-selection.js";
 import type { NormalizedUsage, UsageLike } from "../../agents/usage.js";
@@ -13,8 +14,14 @@ import { normalizeAgentId } from "../../routing/session-key.js";
 import { estimateUsageCost, resolveModelCostConfig } from "../../utils/usage-format.js";
 import { normalizePluginsConfig } from "../config-state.js";
 import { getPluginRuntimeGatewayRequestScope } from "./gateway-request-scope.js";
+import {
+  assertSupportedExecutionMode,
+  isIsolatedAgentRuntimeRequest,
+  runIsolatedAgentRuntimeCompletion,
+} from "./runtime-llm-isolated.js";
 import type {
   LlmCompleteCaller,
+  LlmCompleteErrorCode,
   LlmCompleteParams,
   LlmCompleteResult,
   LlmCompleteUsage,
@@ -33,6 +40,7 @@ export type RuntimeLlmAuthority = {
   allowAgentIdOverride?: boolean;
   allowModelOverride?: boolean;
   allowedModels?: readonly string[];
+  allowAuthProfileOverride?: boolean;
   allowComplete?: boolean;
   denyReason?: string;
 };
@@ -46,6 +54,7 @@ export type CreateRuntimeLlmOptions = {
 type RuntimeLlmOverridePolicy = {
   allowAgentIdOverride: boolean;
   allowModelOverride: boolean;
+  allowAuthProfileOverride: boolean;
   hasConfiguredAllowedModels: boolean;
   allowAnyModel: boolean;
   allowedModels: Set<string>;
@@ -75,6 +84,19 @@ function normalizeCaller(
     ...(normalizeOptionalString(source.id) ? { id: source.id!.trim() } : {}),
     ...(normalizeOptionalString(source.name) ? { name: source.name!.trim() } : {}),
   };
+}
+
+function completionError(
+  code: LlmCompleteErrorCode,
+  message: string,
+  cause?: unknown,
+): Error & { code: LlmCompleteErrorCode } {
+  const error = new Error(message, cause === undefined ? undefined : { cause }) as Error & {
+    code: LlmCompleteErrorCode;
+  };
+  error.name = "LlmCompleteError";
+  error.code = code;
+  return error;
 }
 
 function resolveTrustedCaller(authority?: RuntimeLlmAuthority): LlmCompleteCaller {
@@ -108,17 +130,26 @@ async function resolveAgentId(params: {
   const authorityAgentId = authorityAgentIdRaw ? normalizeAgentId(authorityAgentIdRaw) : undefined;
   const requestedAgentId = requestedAgentIdRaw ? normalizeAgentId(requestedAgentIdRaw) : undefined;
   if (params.authority?.requiresBoundAgent && !authorityAgentId) {
-    throw new Error("Plugin LLM completion is not bound to an active session agent.");
+    throw completionError(
+      "LLM_COMPLETION_NOT_AUTHORIZED",
+      "Plugin LLM completion is not bound to an active session agent.",
+    );
   }
   if (authorityAgentId) {
     if (requestedAgentId && requestedAgentId !== authorityAgentId && !params.allowAgentIdOverride) {
-      throw new Error("Plugin LLM completion cannot override the active session agent.");
+      throw completionError(
+        "LLM_COMPLETION_NOT_AUTHORIZED",
+        "Plugin LLM completion cannot override the active session agent.",
+      );
     }
     return authorityAgentId;
   }
   if (requestedAgentId) {
     if (!params.allowAgentIdOverride) {
-      throw new Error("Plugin LLM completion cannot override the target agent.");
+      throw completionError(
+        "LLM_COMPLETION_NOT_AUTHORIZED",
+        "Plugin LLM completion cannot override the target agent.",
+      );
     }
     return requestedAgentId;
   }
@@ -241,6 +272,7 @@ function normalizeAllowedModelRef(raw: string): string | null {
 function buildPolicyFromEntry(entry: {
   allowAgentIdOverride?: boolean;
   allowModelOverride?: boolean;
+  allowAuthProfileOverride?: boolean;
   hasAllowedModelsConfig?: boolean;
   allowedModels?: readonly string[];
 }): RuntimeLlmOverridePolicy {
@@ -260,6 +292,7 @@ function buildPolicyFromEntry(entry: {
   return {
     allowAgentIdOverride: entry.allowAgentIdOverride === true,
     allowModelOverride: entry.allowModelOverride === true,
+    allowAuthProfileOverride: entry.allowAuthProfileOverride === true,
     hasConfiguredAllowedModels: entry.hasAllowedModelsConfig === true,
     allowAnyModel,
     allowedModels,
@@ -298,6 +331,7 @@ function resolveAuthorityModelPolicy(
   if (
     authority?.allowAgentIdOverride !== true &&
     authority?.allowModelOverride !== true &&
+    authority?.allowAuthProfileOverride !== true &&
     authority?.allowedModels === undefined
   ) {
     return undefined;
@@ -305,46 +339,76 @@ function resolveAuthorityModelPolicy(
   return buildPolicyFromEntry({
     allowAgentIdOverride: authority.allowAgentIdOverride,
     allowModelOverride: authority.allowModelOverride,
+    allowAuthProfileOverride: authority.allowAuthProfileOverride,
     hasAllowedModelsConfig: authority.allowedModels !== undefined,
     allowedModels: authority.allowedModels,
   });
 }
 
-function assertAllowedModelOverride(params: {
-  resolvedModelRef: string | null;
-  pluginPolicyId: string | undefined;
+function assertAllowedAuthProfileOverride(params: {
+  authProfileId: string | undefined;
   authorityPolicy: RuntimeLlmOverridePolicy | undefined;
   pluginPolicy: RuntimeLlmOverridePolicy | undefined;
 }): void {
-  let policy: RuntimeLlmOverridePolicy | undefined;
-  let policyOwnerPluginId: string | undefined;
-  if (params.authorityPolicy?.allowModelOverride) {
-    policy = params.authorityPolicy;
-  } else if (params.pluginPolicy?.allowModelOverride) {
-    policy = params.pluginPolicy;
-    policyOwnerPluginId = params.pluginPolicyId;
+  if (!params.authProfileId) {
+    return;
   }
-  if (!policy) {
-    throw new Error("Plugin LLM completion cannot override the target model.");
+  if (
+    params.authorityPolicy?.allowAuthProfileOverride === true ||
+    params.pluginPolicy?.allowAuthProfileOverride === true
+  ) {
+    return;
+  }
+  throw completionError(
+    "LLM_COMPLETION_NOT_AUTHORIZED",
+    "Plugin LLM completion cannot override the auth profile. Enable plugins.entries.<id>.llm.allowAuthProfileOverride to authorize it.",
+  );
+}
+
+function assertAllowedModelOverride(params: {
+  authorityPolicy: RuntimeLlmOverridePolicy | undefined;
+  pluginPolicy: RuntimeLlmOverridePolicy | undefined;
+}): void {
+  if (
+    params.authorityPolicy?.allowModelOverride !== true &&
+    params.pluginPolicy?.allowModelOverride !== true
+  ) {
+    throw completionError(
+      "LLM_COMPLETION_NOT_AUTHORIZED",
+      "Plugin LLM completion cannot override the target model.",
+    );
+  }
+}
+
+function assertResolvedModelAllowed(params: {
+  resolvedModelRef: string | null;
+  policy: RuntimeLlmOverridePolicy | undefined;
+  policyOwnerPluginId?: string;
+}): void {
+  const policy = params.policy;
+  if (!policy?.hasConfiguredAllowedModels) {
+    return;
   }
   if (policy.allowAnyModel) {
     return;
   }
   if (policy.hasConfiguredAllowedModels && policy.allowedModels.size === 0) {
-    throw new Error("Plugin LLM completion model override allowlist has no valid models.");
-  }
-  if (policy.allowedModels.size === 0) {
-    return;
+    throw completionError(
+      "LLM_COMPLETION_NOT_AUTHORIZED",
+      "Plugin LLM completion model allowlist has no valid models.",
+    );
   }
   if (!params.resolvedModelRef) {
-    throw new Error(
-      "Plugin LLM completion model override allowlist requires a resolvable provider/model target.",
+    throw completionError(
+      "LLM_COMPLETION_NOT_AUTHORIZED",
+      "Plugin LLM completion model allowlist requires a resolvable provider/model target.",
     );
   }
   if (!policy.allowedModels.has(params.resolvedModelRef)) {
-    const owner = policyOwnerPluginId ? ` for plugin "${policyOwnerPluginId}"` : "";
-    throw new Error(
-      `Plugin LLM completion model override "${params.resolvedModelRef}" is not allowlisted${owner}.`,
+    const owner = params.policyOwnerPluginId ? ` for plugin "${params.policyOwnerPluginId}"` : "";
+    throw completionError(
+      "LLM_COMPLETION_NOT_AUTHORIZED",
+      `Plugin LLM completion model "${params.resolvedModelRef}" is not allowlisted${owner}.`,
     );
   }
 }
@@ -366,8 +430,12 @@ export function createRuntimeLlm(
           purpose: params.purpose,
           reason,
         });
-        throw new Error(`Plugin LLM completion denied: ${reason}`);
+        throw completionError(
+          "LLM_COMPLETION_NOT_AUTHORIZED",
+          `Plugin LLM completion denied: ${reason}`,
+        );
       }
+      assertSupportedExecutionMode(params);
 
       const [
         {
@@ -395,24 +463,90 @@ export function createRuntimeLlm(
               pluginPolicy?.allowAgentIdOverride === true,
       });
       const requestedModel = normalizeOptionalString(params.model);
+      const requestedModelProfile = requestedModel
+        ? normalizeOptionalString(splitTrailingAuthProfile(requestedModel).profile)
+        : undefined;
+      const selection = resolveSimpleCompletionSelectionForAgent({
+        cfg,
+        agentId,
+        modelRef: requestedModel,
+      });
+      if (!selection) {
+        throw completionError("LLM_COMPLETION_FAILED", `No model configured for agent ${agentId}.`);
+      }
+      const normalizedSelection = normalizeModelRef(selection.provider, selection.modelId);
+      const resolvedModelRef = modelKey(normalizedSelection.provider, normalizedSelection.model);
+      assertResolvedModelAllowed({ resolvedModelRef, policy: authorityPolicy });
+      assertResolvedModelAllowed({
+        resolvedModelRef,
+        policy: pluginPolicy,
+        policyOwnerPluginId: pluginPolicyId,
+      });
       if (requestedModel) {
-        const selection = resolveSimpleCompletionSelectionForAgent({
+        assertAllowedModelOverride({ authorityPolicy, pluginPolicy });
+      }
+
+      const executionProfile =
+        params.execution?.mode === "isolated-agent-runtime"
+          ? normalizeOptionalString(params.execution.authProfileId)
+          : undefined;
+      const modelProfile = normalizeOptionalString(selection.profileId);
+      if (executionProfile && requestedModelProfile && executionProfile !== requestedModelProfile) {
+        throw completionError(
+          "LLM_ISOLATED_INPUT_REJECTED",
+          "Isolated completion received conflicting auth profiles in model and execution.authProfileId.",
+        );
+      }
+      const effectiveProfile = executionProfile ?? modelProfile;
+      // Credential authority follows caller syntax, not the resolver's effective owner.
+      // selection.profileId still drives dispatch after explicit profile permission is checked.
+      assertAllowedAuthProfileOverride({
+        authProfileId: executionProfile ?? requestedModelProfile,
+        authorityPolicy,
+        pluginPolicy,
+      });
+
+      if (isIsolatedAgentRuntimeRequest(params)) {
+        const result = await runIsolatedAgentRuntimeCompletion({
+          request: params,
           cfg,
           agentId,
-          modelRef: requestedModel,
+          provider: selection.provider,
+          model: selection.modelId,
+          authProfileId: effectiveProfile,
         });
-        const normalizedSelection = selection
-          ? normalizeModelRef(selection.provider, selection.modelId)
-          : null;
-        const resolvedModelRef = normalizedSelection
-          ? modelKey(normalizedSelection.provider, normalizedSelection.model)
-          : null;
-        assertAllowedModelOverride({
-          resolvedModelRef,
-          pluginPolicyId,
-          authorityPolicy,
-          pluginPolicy,
+        const normalizedUsage = normalizeUsage(result.usage as UsageLike | undefined);
+        const usage = buildUsage({
+          rawUsage: result.usage,
+          normalized: normalizedUsage,
+          cfg,
+          provider: result.provider,
+          model: result.model,
         });
+        logger.info("plugin llm completion", {
+          caller,
+          purpose: params.purpose,
+          sessionKey: options.authority?.sessionKey,
+          agentId,
+          provider: result.provider,
+          model: result.model,
+          executionMode: params.execution.mode,
+          executionOwner: result.owner,
+          usage,
+        });
+        return {
+          text: result.text,
+          provider: result.provider,
+          model: result.model,
+          agentId,
+          usage,
+          execution: { mode: params.execution.mode, owner: result.owner },
+          audit: {
+            caller,
+            ...(params.purpose ? { purpose: params.purpose } : {}),
+            ...(options.authority?.sessionKey ? { sessionKey: options.authority.sessionKey } : {}),
+          },
+        };
       }
 
       const prepared = await prepareSimpleCompletionModelForAgent({
@@ -472,6 +606,8 @@ export function createRuntimeLlm(
         agentId,
         provider: prepared.selection.provider,
         model: prepared.selection.modelId,
+        executionMode: "direct-provider",
+        executionOwner: { kind: "provider", id: prepared.selection.provider },
         usage,
       });
 
@@ -481,6 +617,10 @@ export function createRuntimeLlm(
         model: prepared.selection.modelId,
         agentId,
         usage,
+        execution: {
+          mode: "direct-provider",
+          owner: { kind: "provider", id: prepared.selection.provider },
+        },
         audit: {
           caller,
           ...(params.purpose ? { purpose: params.purpose } : {}),

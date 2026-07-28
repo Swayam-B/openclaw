@@ -204,7 +204,7 @@ export type RunHeartbeatOnceOptions = {
   heartbeat?: { target?: string };
 };
 
-type LlmCompleteMessage = {
+export type LlmCompleteMessage = {
   role: "system" | "user" | "assistant";
   content: string;
 };
@@ -224,8 +224,7 @@ export type LlmCompleteUsage = {
   costUsd?: number;
 };
 
-export type LlmCompleteParams = {
-  messages: LlmCompleteMessage[];
+type LlmCompleteCommonParams = {
   /** Model ref (e.g. "anthropic/claude-sonnet-4-6"); defaults to the target agent's configured model. */
   model?: string;
   maxTokens?: number;
@@ -240,12 +239,52 @@ export type LlmCompleteParams = {
   agentId?: string;
 };
 
+export type LlmDirectCompleteParams = LlmCompleteCommonParams & {
+  messages: LlmCompleteMessage[];
+  execution?: undefined;
+};
+
+export type LlmIsolatedAgentRuntimeCompleteParams = LlmCompleteCommonParams & {
+  /** Isolated runtimes currently accept one fresh user prompt, not a replayed chat history. */
+  messages: [{ role: "user"; content: string }];
+  execution: {
+    /** Fresh, literal-zero-tool completion through the configured agent runtime. */
+    mode: "isolated-agent-runtime";
+    /** Exact credential owner. Requires host-granted plugin policy. */
+    authProfileId?: string;
+    timeoutMs?: number;
+  };
+};
+
+export type LlmCompleteParams = LlmDirectCompleteParams | LlmIsolatedAgentRuntimeCompleteParams;
+
+export type LlmCompleteErrorCode =
+  | "LLM_COMPLETION_NOT_AUTHORIZED"
+  | "LLM_ISOLATED_INPUT_REJECTED"
+  | "LLM_ISOLATED_UNSUPPORTED"
+  | "LLM_RUNTIME_UNAVAILABLE"
+  | "LLM_COMPLETION_ABORTED"
+  | "LLM_COMPLETION_TIMEOUT"
+  | "LLM_COMPLETION_OUTPUT_REJECTED"
+  | "LLM_COMPLETION_FAILED";
+
+export type LlmCompleteExecution =
+  | {
+      mode: "direct-provider";
+      owner: { kind: "provider"; id: string };
+    }
+  | {
+      mode: "isolated-agent-runtime";
+      owner: { kind: "cli" | "harness"; id: string };
+    };
+
 export type LlmCompleteResult = {
   text: string;
   provider: string;
   model: string;
   agentId: string;
   usage: LlmCompleteUsage;
+  execution: LlmCompleteExecution;
   audit: {
     caller: LlmCompleteCaller;
     purpose?: string;
@@ -256,10 +295,6 @@ export type LlmCompleteResult = {
 type RuntimeRunEmbeddedAgent = (
   params: import("../../agents/embedded-agent-runner/run/params.js").RunEmbeddedAgentParams,
 ) => Promise<import("../../agents/embedded-agent-runner/types.js").EmbeddedAgentRunResult>;
-
-type RuntimeRunIsolatedCompletion = (
-  params: import("../../agents/isolated-completion.js").RunIsolatedCompletionParams,
-) => Promise<import("../../agents/isolated-completion.js").IsolatedCompletionResult>;
 
 /** Core runtime helpers exposed to trusted native plugins. */
 export type PluginRuntimeCore = {
@@ -302,7 +337,6 @@ export type PluginRuntimeCore = {
     resolveThinkingPolicy: (
       params: PluginRuntimeThinkingPolicyRequest,
     ) => PluginRuntimeThinkingPolicy;
-    runIsolatedCompletion: RuntimeRunIsolatedCompletion;
     runEmbeddedAgent: RuntimeRunEmbeddedAgent;
     /** @deprecated Use runEmbeddedAgent. */
     runEmbeddedPiAgent: RuntimeRunEmbeddedAgent;

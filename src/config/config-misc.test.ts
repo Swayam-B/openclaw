@@ -741,6 +741,7 @@ describe("plugins.entries.*.llm", () => {
             llm: {
               allowModelOverride: true,
               allowedModels: ["anthropic/claude-haiku-4-5"],
+              allowAuthProfileOverride: true,
               allowAgentIdOverride: true,
             },
           },
@@ -758,6 +759,7 @@ describe("plugins.entries.*.llm", () => {
             llm: {
               allowModelOverride: "yes",
               allowedModels: [1],
+              allowAuthProfileOverride: "yes",
               allowAgentIdOverride: "yes",
             },
           },

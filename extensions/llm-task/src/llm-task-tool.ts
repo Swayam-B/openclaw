@@ -4,7 +4,6 @@ import {
   optionalFiniteNumberSchema,
   optionalPositiveIntegerSchema,
 } from "openclaw/plugin-sdk/channel-actions";
-import { resolveEffectiveAgentRuntime } from "openclaw/plugin-sdk/command-auth-native";
 import {
   type JsonSchemaObject,
   validateJsonSchemaValue,
@@ -87,7 +86,6 @@ type PluginCfg = {
   defaultProvider?: string;
   defaultModel?: string;
   defaultAuthProfileId?: string;
-  allowedModels?: string[];
   maxTokens?: number;
   timeoutMs?: number;
 };
@@ -104,8 +102,6 @@ type LlmTaskParams = {
   maxTokens?: unknown;
   timeoutMs?: unknown;
 };
-
-type ThinkingPolicy = ReturnType<OpenClawPluginApi["runtime"]["agent"]["resolveThinkingPolicy"]>;
 
 export const llmTaskToolDefinition = {
   name: "llm-task",
@@ -132,17 +128,6 @@ export const llmTaskToolDefinition = {
   }),
 };
 
-function formatThinkingPolicy(policy: ThinkingPolicy): string {
-  return policy.levels.map((level) => level.label).join(", ");
-}
-
-function supportsThinkingPolicyLevel(
-  policy: ThinkingPolicy,
-  level: ReturnType<OpenClawPluginApi["runtime"]["agent"]["normalizeThinkingLevel"]>,
-): boolean {
-  return Boolean(level) && policy.levels.some((entry) => entry.id === level);
-}
-
 export function createLlmTaskTool(api: OpenClawPluginApi) {
   return {
     ...llmTaskToolDefinition,
@@ -164,17 +149,21 @@ export function createLlmTaskTool(api: OpenClawPluginApi) {
       const primaryModel =
         typeof primary === "string" ? primary.split("/").slice(1).join("/") : undefined;
 
+      const requestProvider =
+        typeof params.provider === "string" ? params.provider.trim() : undefined;
+      const configuredProvider =
+        typeof pluginCfg.defaultProvider === "string"
+          ? pluginCfg.defaultProvider.trim()
+          : undefined;
+      const requestModel = typeof params.model === "string" ? params.model.trim() : undefined;
+      const configuredModel =
+        typeof pluginCfg.defaultModel === "string" ? pluginCfg.defaultModel.trim() : undefined;
       const requestedProvider =
-        (typeof params.provider === "string" && params.provider.trim()) ||
-        (typeof pluginCfg.defaultProvider === "string" && pluginCfg.defaultProvider.trim()) ||
-        primaryProvider ||
-        undefined;
-
-      const rawModel =
-        (typeof params.model === "string" && params.model.trim()) ||
-        (typeof pluginCfg.defaultModel === "string" && pluginCfg.defaultModel.trim()) ||
-        primaryModel ||
-        undefined;
+        requestProvider || configuredProvider || primaryProvider || undefined;
+      const rawModel = requestModel || configuredModel || primaryModel || undefined;
+      const hasModelOverride = Boolean(
+        requestProvider || configuredProvider || requestModel || configuredModel,
+      );
       const { provider: resolvedProvider, model } = resolveLlmTaskModelRef({
         api,
         provider: requestedProvider,
@@ -195,40 +184,14 @@ export function createLlmTaskTool(api: OpenClawPluginApi) {
         );
       }
 
-      const allowed = Array.isArray(pluginCfg.allowedModels) ? pluginCfg.allowedModels : undefined;
-      if (allowed && allowed.length > 0 && !allowed.includes(modelKey)) {
-        throw new Error(
-          `Model not allowed by llm-task plugin config: ${modelKey}. Allowed models: ${allowed.join(", ")}`,
-        );
-      }
-
-      const agentRuntime = resolveEffectiveAgentRuntime({
-        cfg: api.config ?? {},
-        provider,
-        modelId: model,
-      });
-
       const thinkingRaw =
         typeof params.thinking === "string" && params.thinking.trim() ? params.thinking : undefined;
       let thinkLevel: ReturnType<OpenClawPluginApi["runtime"]["agent"]["normalizeThinkingLevel"]> =
         undefined;
       if (thinkingRaw) {
-        const thinkingPolicy = api.runtime.agent.resolveThinkingPolicy({
-          provider,
-          model,
-          agentRuntime,
-        });
-        const thinkingLevelsHint = formatThinkingPolicy(thinkingPolicy);
         thinkLevel = api.runtime.agent.normalizeThinkingLevel(thinkingRaw);
         if (!thinkLevel) {
-          throw new Error(
-            `Invalid thinking level "${thinkingRaw}". Use one of: ${thinkingLevelsHint}.`,
-          );
-        }
-        if (!supportsThinkingPolicyLevel(thinkingPolicy, thinkLevel)) {
-          throw new Error(
-            `Thinking level "${thinkLevel}" is not supported for ${provider}/${model}. Use one of: ${thinkingLevelsHint}.`,
-          );
+          throw new Error(`Invalid thinking level "${thinkingRaw}".`);
         }
       }
 
@@ -260,18 +223,24 @@ export function createLlmTaskTool(api: OpenClawPluginApi) {
         "Do not call tools.",
       ].join(" ");
 
-      const result = await api.runtime.agent.runIsolatedCompletion({
-        config: api.config,
-        workspaceDir: api.config?.agents?.defaults?.workspace ?? process.cwd(),
+      const result = await api.runtime.llm.complete({
+        messages: [
+          {
+            role: "user",
+            content: `TASK:\n${prompt}\n\nINPUT_JSON:\n${inputJson}\n`,
+          },
+        ],
         systemPrompt: system,
-        prompt: `TASK:\n${prompt}\n\nINPUT_JSON:\n${inputJson}\n`,
-        timeoutMs,
-        provider,
-        model,
-        authProfileId,
-        agentHarnessRuntimeOverride: agentRuntime,
-        thinkLevel,
-        streamParams,
+        model: hasModelOverride ? modelKey : undefined,
+        reasoning: thinkLevel,
+        maxTokens: streamParams.maxTokens,
+        temperature: streamParams.temperature,
+        purpose: "llm-task",
+        execution: {
+          mode: "isolated-agent-runtime",
+          authProfileId,
+          timeoutMs,
+        },
       });
 
       const raw = stripCodeFences(result.text);
