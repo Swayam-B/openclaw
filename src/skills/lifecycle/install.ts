@@ -698,6 +698,7 @@ export async function installSkill(params: SkillInstallRequest): Promise<SkillIn
   const normalizedSpec = spec ? normalizeSkillInstallSpec(spec) : undefined;
   const scanResult = await evaluateSkillInstallPolicy({
     config: params.config,
+    workspaceDir,
     installId: params.installId,
     ...(normalizedSpec ? { installSpec: normalizedSpec } : {}),
     logger: {

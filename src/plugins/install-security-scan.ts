@@ -165,6 +165,7 @@ export async function preflightPluginGitInstallPolicy(params: {
 /** Evaluates shared install policy for skill-managed dependency installs. */
 export async function evaluateSkillInstallPolicy(params: {
   config?: OpenClawConfig;
+  workspaceDir: string;
   installId: string;
   installSpec?: SkillInstallSpecMetadata;
   logger: InstallScanLogger;

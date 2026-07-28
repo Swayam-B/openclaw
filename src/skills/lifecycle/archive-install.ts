@@ -165,6 +165,7 @@ export async function installExtractedSkillRoot(params: {
     if (params.policy) {
       const scanResult = await evaluateSkillInstallPolicy({
         config: params.policy.config,
+        workspaceDir: params.workspaceDir,
         installId: params.policy.installId ?? "archive",
         logger: params.logger ?? {},
         origin: params.policy.origin,

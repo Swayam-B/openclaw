@@ -1,6 +1,7 @@
 // Runtime bridge for plugin install security scanning.
 import fs from "node:fs/promises";
 import path from "node:path";
+import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope-config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { tryReadJson } from "../infra/json-files.js";
@@ -14,7 +15,7 @@ import {
   type InstallPolicySource,
 } from "../security/install-policy.js";
 import { isPathInside } from "../security/scan-paths.js";
-import { resolveManifestActivationPluginIds } from "./activation-planner.js";
+import { resolveManifestActivationPlan } from "./activation-planner.js";
 import {
   findBlockedManifestDependencies,
   findBlockedNodeModulesDirectory,
@@ -28,6 +29,7 @@ import { resolveExplicitEffectivePluginIds } from "./effective-plugin-ids.js";
 import { getGlobalHookRunner } from "./hook-runner-global.js";
 import { createBeforeInstallHookPayload } from "./install-policy-context.js";
 import type { InstallSafetyOverrides } from "./install-security-scan.types.js";
+import { loadPluginRegistrySnapshot } from "./plugin-registry-snapshot.js";
 import { ensurePluginRegistryLoaded } from "./runtime/runtime-registry-loader.js";
 
 type InstallScanLogger = {
@@ -702,6 +704,7 @@ async function scanPluginDependencyDenylist(params: {
 
 async function runBeforeInstallHook(params: {
   config?: OpenClawConfig;
+  workspaceDir?: string;
   logger: InstallScanLogger;
   installLabel: string;
   origin: string;
@@ -728,10 +731,17 @@ async function runBeforeInstallHook(params: {
   };
 }): Promise<InstallSecurityScanResult | undefined> {
   try {
-    const explicitlyEnabledPluginIds = resolveExplicitEffectivePluginIds(params.config ?? {});
+    const config = params.config ?? {};
+    const workspaceDir =
+      params.workspaceDir ?? resolveAgentWorkspaceDir(config, resolveDefaultAgentId(config));
+    const pluginIndex = loadPluginRegistrySnapshot({ config, workspaceDir });
+    const explicitlyEnabledPluginIds = resolveExplicitEffectivePluginIds(config, {
+      pluginRecords: pluginIndex.plugins,
+    });
     if (explicitlyEnabledPluginIds.length > 0) {
-      const hookProviderIds = resolveManifestActivationPluginIds({
-        config: params.config,
+      const activationPlan = resolveManifestActivationPlan({
+        config,
+        workspaceDir,
         onlyPluginIds: explicitlyEnabledPluginIds,
         requireExplicitManifestOwnerTrust: true,
         trigger: {
@@ -739,9 +749,21 @@ async function runBeforeInstallHook(params: {
           capability: "hook",
         },
       });
+      const activationErrors = activationPlan.diagnostics.filter(
+        (diagnostic) => diagnostic.level === "error",
+      );
+      if (activationErrors.length > 0) {
+        throw new Error(
+          `hook provider manifest discovery failed: ${activationErrors
+            .map((diagnostic) => diagnostic.message)
+            .join("; ")}`,
+        );
+      }
+      const hookProviderIds = [...activationPlan.pluginIds];
       if (hookProviderIds.length > 0) {
         ensurePluginRegistryLoaded({
-          config: params.config,
+          config,
+          workspaceDir,
           onlyPluginIds: hookProviderIds,
         });
       }
@@ -1271,6 +1293,7 @@ export async function preflightPluginGitInstallPolicyRuntime(params: {
 
 export async function evaluateSkillInstallPolicyRuntime(params: {
   config?: OpenClawConfig;
+  workspaceDir: string;
   installId: string;
   installSpec?: SkillInstallSpec;
   logger: InstallScanLogger;
@@ -1308,6 +1331,7 @@ export async function evaluateSkillInstallPolicyRuntime(params: {
 
   const hookResult = await runBeforeInstallHook({
     config: params.config,
+    workspaceDir: params.workspaceDir,
     logger: params.logger,
     installLabel: `Skill "${params.skillName}" installation`,
     origin: formatInstallPolicyOriginForHook(params.origin),

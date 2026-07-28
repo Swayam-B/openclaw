@@ -16,6 +16,8 @@ import {
 import { normalizePluginsConfig } from "./config-state.js";
 import { loadManifestMetadataSnapshot } from "./manifest-contract-eligibility.js";
 import { passesManifestOwnerBasePolicy } from "./manifest-owner-policy.js";
+import { normalizePluginPolicyId } from "./plugin-policy-id.js";
+import type { PluginRegistryRecord } from "./plugin-registry-snapshot.js";
 import { defaultSlotIdForKey } from "./slots.js";
 
 function collectConfiguredChannelIds(
@@ -98,28 +100,56 @@ function collectBundledChannelOwnerPluginIds(params: {
   return sortUniqueStrings(pluginIds);
 }
 
-/** Lists plugin ids explicitly enabled through allowlist or entry config. */
-export function resolveExplicitEffectivePluginIds(config: OpenClawConfig): string[] {
+/** Lists canonical plugin ids explicitly trusted through config policy or load paths. */
+export function resolveExplicitEffectivePluginIds(
+  config: OpenClawConfig,
+  options: {
+    pluginRecords?: readonly Pick<PluginRegistryRecord, "origin" | "pluginId">[];
+  } = {},
+): string[] {
   const plugins = normalizePluginsConfig(config.plugins);
   if (!plugins.enabled) {
     return [];
   }
 
-  const ids = new Set(plugins.allow);
+  const canonicalPluginIds = new Map(
+    (options.pluginRecords ?? []).map((plugin) => [
+      normalizePluginPolicyId(plugin.pluginId),
+      plugin.pluginId,
+    ]),
+  );
+  const resolveCanonicalPluginId = (pluginId: string) =>
+    canonicalPluginIds.get(normalizePluginPolicyId(pluginId)) ?? pluginId;
+  const ids = new Set(plugins.allow.map(resolveCanonicalPluginId));
   for (const [pluginId, entry] of Object.entries(plugins.entries)) {
     if (
       entry?.enabled === true &&
       (plugins.allow.length === 0 || plugins.allow.includes(pluginId))
     ) {
-      ids.add(pluginId);
+      ids.add(resolveCanonicalPluginId(pluginId));
+    }
+  }
+  for (const plugin of options.pluginRecords ?? []) {
+    if (plugin.origin === "config") {
+      ids.add(plugin.pluginId);
     }
   }
   for (const pluginId of plugins.deny) {
-    ids.delete(pluginId);
+    const policyId = normalizePluginPolicyId(pluginId);
+    for (const id of ids) {
+      if (normalizePluginPolicyId(id) === policyId) {
+        ids.delete(id);
+      }
+    }
   }
   for (const [pluginId, entry] of Object.entries(plugins.entries)) {
     if (entry?.enabled === false) {
-      ids.delete(pluginId);
+      const policyId = normalizePluginPolicyId(pluginId);
+      for (const id of ids) {
+        if (normalizePluginPolicyId(id) === policyId) {
+          ids.delete(id);
+        }
+      }
     }
   }
   return sortUniqueStrings(ids);
