@@ -8,6 +8,8 @@ const findBlockedPackageDirectoryInPathMock = vi.fn();
 const findBlockedPackageFileAliasInPathMock = vi.fn();
 const getGlobalHookRunnerMock = vi.fn();
 const getGlobalHookRunnerRegistryMock = vi.fn();
+const getActivePluginRegistryMock = vi.fn();
+const getActivePluginRegistryWorkspaceDirMock = vi.fn();
 const createHookRunnerMock = vi.fn();
 const resolveManifestActivationPlanMock = vi.fn();
 const loadPluginRegistrySnapshotMock = vi.fn();
@@ -45,6 +47,11 @@ vi.mock("./hook-runner-global.js", () => ({
 
 vi.mock("./hook-runner-global-state.js", () => ({
   getGlobalHookRunnerRegistry: () => getGlobalHookRunnerRegistryMock(),
+}));
+
+vi.mock("./runtime.js", () => ({
+  getActivePluginRegistry: () => getActivePluginRegistryMock(),
+  getActivePluginRegistryWorkspaceDir: () => getActivePluginRegistryWorkspaceDirMock(),
 }));
 
 vi.mock("./hooks.js", () => ({
@@ -95,6 +102,10 @@ beforeEach(() => {
   getGlobalHookRunnerMock.mockReset();
   getGlobalHookRunnerRegistryMock.mockReset();
   getGlobalHookRunnerRegistryMock.mockReturnValue(null);
+  getActivePluginRegistryMock.mockReset();
+  getActivePluginRegistryMock.mockReturnValue(null);
+  getActivePluginRegistryWorkspaceDirMock.mockReset();
+  getActivePluginRegistryWorkspaceDirMock.mockReturnValue(undefined);
   createHookRunnerMock.mockReset();
   createHookRunnerMock.mockImplementation(() => getGlobalHookRunnerMock());
   resolveManifestActivationPlanMock.mockReset();
@@ -601,6 +612,59 @@ describe("legacy file install scan compatibility", () => {
         onlyPluginIds: ["canonical-scanner"],
       }),
     );
+  });
+
+  it("fails closed when a persisted config-path scanner root disappears", async () => {
+    const rootDir = "/plugins/missing-scanner";
+    loadPluginRegistrySnapshotMock.mockReturnValue({
+      diagnostics: [
+        {
+          level: "error",
+          message: "plugin path not found",
+          source: rootDir,
+        },
+      ],
+      plugins: [],
+    });
+    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
+      plugins: [
+        {
+          compat: ["activation-capability-hint"],
+          enabled: true,
+          manifestPath: `${rootDir}/openclaw.plugin.json`,
+          origin: "config",
+          pluginId: "scanner",
+          rootDir,
+          startup: { activationCapabilities: ["hook"] },
+        },
+      ],
+    });
+    resolveManifestActivationPlanMock.mockReturnValue({
+      diagnostics: [],
+      entries: [],
+      pluginIds: [],
+      trigger: { kind: "capability", capability: "hook" },
+    });
+
+    const result = await scanFileInstallSourceRuntime({
+      config: {
+        plugins: {
+          load: { paths: [rootDir] },
+        },
+      },
+      filePath: "/tmp/payload.js",
+      logger: {},
+      pluginId: "payload",
+    });
+
+    expect(result).toEqual({
+      blocked: {
+        code: "security_scan_failed",
+        reason:
+          "Installation blocked because before_install hook failed: hook provider manifest discovery failed: plugin path not found",
+      },
+    });
+    expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
   });
 
   it("does not recover a malformed scanner after current config disables it", async () => {

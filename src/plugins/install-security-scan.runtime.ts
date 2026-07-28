@@ -60,7 +60,9 @@ function resolveBeforeInstallHookRunner(params: {
       !params.disabledPluginIds.has(normalizedId)
     );
   };
+  const activeRegistry = getActivePluginRegistry();
   if (
+    activeRegistry === null &&
     params.hookProviderIds.length === 0 &&
     params.disabledPluginIds.size === 0 &&
     params.allowedPluginIds === null &&
@@ -68,7 +70,6 @@ function resolveBeforeInstallHookRunner(params: {
   ) {
     return getGlobalHookRunner();
   }
-  const activeRegistry = getActivePluginRegistry();
   const activeRegistryWorkspaceDir = getActivePluginRegistryWorkspaceDir();
   const activeRegistryMatchesTarget =
     activeRegistry !== null &&
@@ -108,7 +109,7 @@ function resolveBeforeInstallHookRunner(params: {
         })
       : undefined;
   if (!isolatedRegistry && !globalRegistry) {
-    return getGlobalHookRunner();
+    return null;
   }
   const isolatedPluginIds = new Set(
     isolatedRegistry?.plugins.map((plugin) => normalizePluginPolicyId(plugin.id)) ?? [],
@@ -861,9 +862,12 @@ async function runBeforeInstallHook(params: {
       ) {
         return true;
       }
-      return (
-        diagnostic.source !== undefined &&
-        path.resolve(diagnostic.source) === path.resolve(plugin.manifestPath)
+      if (diagnostic.source === undefined) {
+        return false;
+      }
+      const diagnosticSource = path.resolve(diagnostic.source);
+      return [plugin.manifestPath, plugin.rootDir, plugin.source, plugin.setupSource].some(
+        (recordPath) => recordPath !== undefined && path.resolve(recordPath) === diagnosticSource,
       );
     };
     const recoverableHookProviderRecords =

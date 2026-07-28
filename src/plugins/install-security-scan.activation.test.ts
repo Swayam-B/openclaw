@@ -458,6 +458,51 @@ describe("install hook provider activation", () => {
     expect(result?.blocked?.reason).toBe("workspace B scanner");
   });
 
+  it("does not fall back to hooks from another active workspace", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceA = makeTempDir();
+    const workspaceB = makeTempDir();
+    const scanner = writeLabeledBeforeInstallBlocker(
+      "workspace-a-only-scanner",
+      path.join(workspaceA, ".openclaw", "extensions", "workspace-a-only-scanner"),
+      "workspace A scanner",
+    );
+    const enabledConfig = {
+      plugins: {
+        allow: [scanner.id],
+        entries: {
+          [scanner.id]: { enabled: true },
+        },
+      },
+    };
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () => {
+        ensurePluginRegistryLoaded({
+          config: enabledConfig,
+          workspaceDir: workspaceA,
+          onlyPluginIds: [scanner.id],
+        });
+        return await evaluateSkillInstallPolicyRuntime({
+          config: {},
+          workspaceDir: workspaceB,
+          installId: "node",
+          logger: {},
+          origin: { type: "workspace" },
+          skillName: "payload",
+          sourceDir: makeTempDir(),
+        });
+      },
+    );
+
+    expect(result).toBeUndefined();
+  });
+
   it("uses the target active scanner instead of a same-id pinned scanner", async () => {
     useNoBundledPlugins();
     const stateDir = makeTempDir();
