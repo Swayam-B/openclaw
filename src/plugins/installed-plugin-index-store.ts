@@ -19,6 +19,7 @@ import {
 import {
   diffInstalledPluginIndexInvalidationReasons,
   extractPluginInstallRecordsFromInstalledPluginIndex,
+  hasMissingCapabilityActivationMetadata,
   hasMissingConfigPathActivationMetadata,
   INSTALLED_PLUGIN_INDEX_WARNING,
   INSTALLED_PLUGIN_INDEX_VERSION,
@@ -425,7 +426,8 @@ function canRefreshPersistedPolicyState(
     persisted.hostContractVersion !== resolveCompatibilityHostVersion(env) ||
     persisted.compatRegistryVersion !== resolveCompatRegistryVersion() ||
     persisted.migrationVersion !== INSTALLED_PLUGIN_INDEX_MIGRATION_VERSION ||
-    hasMissingConfigPathActivationMetadata(persisted)
+    hasMissingConfigPathActivationMetadata(persisted) ||
+    hasMissingCapabilityActivationMetadata(persisted)
   ) {
     return false;
   }

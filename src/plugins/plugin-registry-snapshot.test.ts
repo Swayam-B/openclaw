@@ -51,6 +51,7 @@ function writeManifestlessClaudeBundle(rootDir: string) {
 function writePackagePlugin(
   rootDir: string,
   options: {
+    activationCapabilities?: readonly string[];
     configPaths?: readonly string[];
     pluginId?: string;
     requiresPlugins?: readonly string[];
@@ -66,7 +67,16 @@ function writePackagePlugin(
       name: pluginId,
       description: "one",
       configSchema: { type: "object" },
-      ...(options.configPaths ? { activation: { onConfigPaths: options.configPaths } } : {}),
+      ...(options.configPaths || options.activationCapabilities
+        ? {
+            activation: {
+              ...(options.configPaths ? { onConfigPaths: options.configPaths } : {}),
+              ...(options.activationCapabilities
+                ? { onCapabilities: options.activationCapabilities }
+                : {}),
+            },
+          }
+        : {}),
       ...(options.requiresPlugins ? { requiresPlugins: options.requiresPlugins } : {}),
     }),
     "utf8",
@@ -212,6 +222,22 @@ function dropStartupConfigPaths(
       deferConfiguredChannelFullLoadUntilAfterListen:
         plugin.startup.deferConfiguredChannelFullLoadUntilAfterListen,
       agentHarnesses: plugin.startup.agentHarnesses,
+    },
+  };
+}
+
+function dropStartupActivationCapabilities(
+  plugin: InstalledPluginIndex["plugins"][number],
+): InstalledPluginIndex["plugins"][number] {
+  return {
+    ...plugin,
+    startup: {
+      sidecar: plugin.startup.sidecar,
+      memory: plugin.startup.memory,
+      deferConfiguredChannelFullLoadUntilAfterListen:
+        plugin.startup.deferConfiguredChannelFullLoadUntilAfterListen,
+      agentHarnesses: plugin.startup.agentHarnesses,
+      configPaths: plugin.startup.configPaths,
     },
   };
 }
@@ -789,6 +815,35 @@ describe("loadPluginRegistrySnapshotWithMetadata", () => {
     expect(result.source).toBe("derived");
     expectDiagnosticsContainCode(result.diagnostics, "persisted-registry-stale-source");
     expect(result.snapshot.plugins[0]?.startup.configPaths).toEqual(["browser"]);
+  });
+
+  it("rebuilds legacy capability persisted registries before hook activation", () => {
+    const tempRoot = makeTempDir();
+    const rootDir = path.join(tempRoot, "workspace");
+    const stateDir = path.join(tempRoot, "state");
+    const env = { ...createHermeticEnv(tempRoot), OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1" };
+    const config = {
+      plugins: {
+        load: { paths: [rootDir] },
+      },
+    };
+    writePackagePlugin(rootDir, { activationCapabilities: ["hook"] });
+    const index = loadInstalledPluginIndex({ config, env });
+    const legacyIndex: InstalledPluginIndex = {
+      ...index,
+      plugins: index.plugins.map(dropStartupActivationCapabilities),
+    };
+    writePersistedInstalledPluginIndexSync(legacyIndex, { stateDir });
+
+    const result = loadPluginRegistrySnapshotWithMetadata({
+      config,
+      env,
+      stateDir,
+    });
+
+    expect(result.source).toBe("derived");
+    expectDiagnosticsContainCode(result.diagnostics, "persisted-registry-stale-source");
+    expect(result.snapshot.plugins[0]?.startup.activationCapabilities).toEqual(["hook"]);
   });
 
   it("keeps persisted package plugins with dot-prefixed package metadata paths", () => {
