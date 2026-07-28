@@ -239,6 +239,43 @@ describe("install hook provider activation", () => {
     });
   });
 
+  it("does not accept a legacy internal hook as a before_install provider", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const scanner = writePlugin({
+      id: "legacy-internal-hook-scanner",
+      filename: "legacy-internal-hook-scanner.cjs",
+      body: `module.exports = { id: "legacy-internal-hook-scanner", register(api) {
+        api.registerHook("before_install", () => {}, { name: "legacy-before-install" });
+      } };`,
+    });
+    const manifestPath = path.join(scanner.dir, "openclaw.plugin.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+    manifest.activation = { onHooks: ["before_install"] };
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () =>
+        await scanFileInstallSourceRuntime({
+          config: { plugins: { load: { paths: [scanner.file] } } },
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        }),
+    );
+
+    expect(result?.blocked).toEqual({
+      code: "security_scan_failed",
+      reason: expect.stringContaining(
+        "hook providers did not register before_install in install-scan mode: legacy-internal-hook-scanner",
+      ),
+    });
+  });
+
   it("does not treat the broad hook capability as an install scanner declaration", async () => {
     useNoBundledPlugins();
     const stateDir = makeTempDir();

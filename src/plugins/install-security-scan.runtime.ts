@@ -91,10 +91,11 @@ function resolveBeforeInstallHookRunner(params: {
   ];
   const hookOwnerByPluginId = new Map<string, GlobalHookRunnerRegistry>();
   for (const registry of registrySources) {
-    const providerIds = new Set([
-      ...registry.typedHooks.map((hook) => normalizePluginPolicyId(hook.pluginId)),
-      ...registry.hooks.map((hook) => normalizePluginPolicyId(hook.pluginId)),
-    ]);
+    const providerIds = new Set(
+      registry.typedHooks
+        .filter((hook) => hook.hookName === "before_install")
+        .map((hook) => normalizePluginPolicyId(hook.pluginId)),
+    );
     for (const plugin of registry.plugins) {
       const pluginId = normalizePluginPolicyId(plugin.id);
       if (
@@ -143,14 +144,11 @@ function resolveBeforeInstallHookRunner(params: {
       .filter((plugin) => plugin.status === "loaded")
       .map((plugin) => normalizePluginPolicyId(plugin.id)) ?? [],
   );
-  const globalBeforeInstallProviderIds = new Set([
-    ...(globalRegistry?.typedHooks
+  const globalBeforeInstallProviderIds = new Set(
+    globalRegistry?.typedHooks
       .filter((hook) => hook.hookName === "before_install")
-      .map((hook) => normalizePluginPolicyId(hook.pluginId)) ?? []),
-    ...(globalRegistry?.hooks
-      .filter((hook) => hook.events.includes("before_install"))
-      .map((hook) => normalizePluginPolicyId(hook.pluginId)) ?? []),
-  ]);
+      .map((hook) => normalizePluginPolicyId(hook.pluginId)) ?? [],
+  );
   const hookProviderIdsToLoad = params.hookProviderIds.filter((pluginId) => {
     const normalizedId = normalizePluginPolicyId(pluginId);
     return (
@@ -166,14 +164,11 @@ function resolveBeforeInstallHookRunner(params: {
           onlyPluginIds: hookProviderIdsToLoad,
         })
       : undefined;
-  const isolatedBeforeInstallProviderIds = new Set([
-    ...(isolatedRegistry?.typedHooks
+  const isolatedBeforeInstallProviderIds = new Set(
+    isolatedRegistry?.typedHooks
       .filter((hook) => hook.hookName === "before_install")
-      .map((hook) => normalizePluginPolicyId(hook.pluginId)) ?? []),
-    ...(isolatedRegistry?.hooks
-      .filter((hook) => hook.events.includes("before_install"))
-      .map((hook) => normalizePluginPolicyId(hook.pluginId)) ?? []),
-  ]);
+      .map((hook) => normalizePluginPolicyId(hook.pluginId)) ?? [],
+  );
   const missingIsolatedProviders = hookProviderIdsToLoad.filter(
     (pluginId) => !isolatedBeforeInstallProviderIds.has(normalizePluginPolicyId(pluginId)),
   );
