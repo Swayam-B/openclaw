@@ -175,7 +175,7 @@ function buildCacheKey(params: {
   requireSetupEntryForSetupOnlyChannelPlugins?: boolean;
   preferSetupRuntimeForChannelPlugins?: boolean;
   forceFullRuntimeForChannelPlugins?: boolean;
-  forceFullRegistrationMode?: boolean;
+  installScanRegistration?: boolean;
   preferBuiltPluginArtifacts?: boolean;
   resolveRawConfigEnvVars?: boolean;
   toolDiscovery?: boolean;
@@ -222,7 +222,7 @@ function buildCacheKey(params: {
         ? "prefer-setup"
         : "full";
   const registrationMode =
-    params.forceFullRegistrationMode === true ? "force-full-registration" : "default-registration";
+    params.installScanRegistration === true ? "install-scan" : "default-registration";
   const bundledArtifactMode =
     params.preferBuiltPluginArtifacts === true ? "prefer-built-artifacts" : "source-default";
   const rawConfigEnvMode =
@@ -347,7 +347,7 @@ export function resolvePluginLoadCacheContext(options: PluginLoadOptions = {}) {
     options.requireSetupEntryForSetupOnlyChannelPlugins === true;
   const preferSetupRuntimeForChannelPlugins = options.preferSetupRuntimeForChannelPlugins === true;
   const forceFullRuntimeForChannelPlugins = options.forceFullRuntimeForChannelPlugins === true;
-  const forceFullRegistrationMode = options.forceFullRegistrationMode === true;
+  const installScanRegistration = options.installScanRegistration === true;
   const preferBuiltPluginArtifacts = options.preferBuiltPluginArtifacts === true;
   const runtimeSubagentMode = resolveRuntimeSubagentMode(options.runtimeOptions);
   const coreGatewayMethodNames = resolveCoreGatewayMethodNames(options);
@@ -404,7 +404,7 @@ export function resolvePluginLoadCacheContext(options: PluginLoadOptions = {}) {
     requireSetupEntryForSetupOnlyChannelPlugins,
     preferSetupRuntimeForChannelPlugins,
     forceFullRuntimeForChannelPlugins,
-    forceFullRegistrationMode,
+    installScanRegistration,
     preferBuiltPluginArtifacts,
     resolveRawConfigEnvVars: options.resolveRawConfigEnvVars,
     toolDiscovery: options.toolDiscovery,
@@ -428,7 +428,7 @@ export function resolvePluginLoadCacheContext(options: PluginLoadOptions = {}) {
     requireSetupEntryForSetupOnlyChannelPlugins,
     preferSetupRuntimeForChannelPlugins,
     forceFullRuntimeForChannelPlugins,
-    forceFullRegistrationMode,
+    installScanRegistration,
     preferBuiltPluginArtifacts,
     shouldActivate: options.activate !== false,
     shouldLoadModules: options.loadModules !== false,

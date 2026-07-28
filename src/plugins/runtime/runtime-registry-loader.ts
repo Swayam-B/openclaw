@@ -240,7 +240,7 @@ export function loadIsolatedPluginRegistry(options: {
     buildPluginRuntimeLoadOptionsFromValues(context, {
       activate: false,
       cache: false,
-      forceFullRegistrationMode: true,
+      installScanRegistration: true,
       forceFullRuntimeForChannelPlugins: true,
       onlyPluginIds: normalizePluginIdScope(options.onlyPluginIds) ?? [],
       throwOnLoadError: true,

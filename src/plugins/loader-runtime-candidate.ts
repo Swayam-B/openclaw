@@ -262,7 +262,7 @@ export function loadRuntimePluginCandidate(params: {
       ? false
       : context.preferSetupRuntimeForChannelPlugins,
     forceFullRuntimeForChannelPlugins: context.forceFullRuntimeForChannelPlugins,
-    forceFullRegistrationMode: context.forceFullRegistrationMode,
+    installScanRegistration: context.installScanRegistration,
     toolDiscovery: params.options.toolDiscovery === true,
   });
   if (!registrationPlan) {

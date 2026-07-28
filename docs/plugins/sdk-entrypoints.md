@@ -331,6 +331,7 @@ full activation.
 | ------------------ | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `"full"`           | Normal gateway startup                             | Everything                                                                                                              |
 | `"discovery"`      | Read-only capability discovery                     | Channel registration plus static CLI descriptors; entry code may load, but skip sockets, workers, clients, and services |
+| `"install-scan"`   | Transient install-policy hook discovery            | Install-policy hooks only; skip channels, sockets, workers, clients, and services                                       |
 | `"tool-discovery"` | Scoped load to list or run specific plugins' tools | Capability/tool registration only; no channel activation                                                                |
 | `"setup-only"`     | Disabled/unconfigured channel                      | Channel registration only                                                                                               |
 | `"setup-runtime"`  | Setup flow with runtime available                  | Channel registration plus only the lightweight runtime needed before the full entry loads                               |
@@ -342,6 +343,11 @@ full activation.
 
 ```typescript
 register(api) {
+  if (api.registrationMode === "install-scan") {
+    api.on("before_install", scanInstall);
+    return;
+  }
+
   if (
     api.registrationMode === "cli-metadata" ||
     api.registrationMode === "discovery" ||

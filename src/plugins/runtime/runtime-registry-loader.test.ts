@@ -265,7 +265,7 @@ describe("ensurePluginRegistryLoaded", () => {
     expect(loadOptions(1).onlyPluginIds).toEqual(["demo-b"]);
   });
 
-  it("loads an isolated full runtime without activating or caching it", () => {
+  it("loads an isolated install scanner without advertising live activation", () => {
     loadIsolatedPluginRegistry({
       config: {} as never,
       onlyPluginIds: ["demo"],
@@ -274,7 +274,7 @@ describe("ensurePluginRegistryLoaded", () => {
     expect(mocks.loadOpenClawPlugins).toHaveBeenCalledOnce();
     expect(loadOptions().activate).toBe(false);
     expect(loadOptions().cache).toBe(false);
-    expect(loadOptions().forceFullRegistrationMode).toBe(true);
+    expect(loadOptions().installScanRegistration).toBe(true);
     expect(loadOptions().forceFullRuntimeForChannelPlugins).toBe(true);
     expect(loadOptions().onlyPluginIds).toEqual(["demo"]);
     expect(loadOptions().throwOnLoadError).toBe(true);

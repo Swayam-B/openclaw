@@ -308,6 +308,7 @@ export type OpenClawPluginChannelRegistration = {
  *
  * - `full`: live runtime activation; long-lived side effects may start.
  * - `discovery`: read-only capability discovery; skip sockets/workers/clients.
+ * - `install-scan`: transient install-policy hook discovery; skip long-lived side effects.
  * - `tool-discovery`: capability discovery for executable tools; skip channel runtime hydration.
  * - `setup-only`: lightweight channel setup entry only.
  * - `setup-runtime`: setup flow that also needs the runtime channel entry.
@@ -316,6 +317,7 @@ export type OpenClawPluginChannelRegistration = {
 export type PluginRegistrationMode =
   | "full"
   | "discovery"
+  | "install-scan"
   | "tool-discovery"
   | "setup-only"
   | "setup-runtime"

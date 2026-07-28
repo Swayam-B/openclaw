@@ -29,11 +29,12 @@ type PluginRegistrationCapabilities = {
 export function resolvePluginRegistrationCapabilities(
   mode: import("./types.js").PluginRegistrationMode,
 ): PluginRegistrationCapabilities {
-  const capabilityHandlers = mode === "full" || mode === "discovery" || mode === "tool-discovery";
+  const capabilityHandlers =
+    mode === "full" || mode === "discovery" || mode === "install-scan" || mode === "tool-discovery";
   return {
     capabilityHandlers,
     setupRuntimeHandlers: mode === "setup-runtime",
-    runtimeChannel: mode !== "setup-only" && mode !== "tool-discovery",
+    runtimeChannel: mode !== "setup-only" && mode !== "install-scan" && mode !== "tool-discovery",
   };
 }
 
