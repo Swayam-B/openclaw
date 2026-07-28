@@ -153,7 +153,9 @@ that declare `activation.onHooks: ["before_install"]` are loaded before
 merge findings, and stop at the first block. Use `security.installPolicy` for
 operator-owned install decisions because a plugin cannot inspect its own first
 installation and plugin enablement controls whether its hook runs. The
-deprecated `--dangerously-force-unsafe-install` flag is accepted for
+activation hint is required for cold loading; already-loaded, explicitly
+trusted plugin runtimes retain the pre-hint hook behavior for compatibility.
+The deprecated `--dangerously-force-unsafe-install` flag is accepted for
 compatibility but is a no-op: it does not bypass install policy, plugin hooks,
 or OpenClaw's built-in plugin dependency denylist.
 

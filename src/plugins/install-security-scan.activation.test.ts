@@ -786,7 +786,7 @@ describe("install hook provider activation", () => {
     expect(result?.blocked?.reason).toBe("current scanner config blocks");
   });
 
-  it("does not reuse an active hook without a current activation declaration", async () => {
+  it("keeps an explicitly trusted active hook without an activation declaration", async () => {
     useNoBundledPlugins();
     const stateDir = makeTempDir();
     const workspaceDir = makeTempDir();
@@ -823,14 +823,19 @@ describe("install hook provider activation", () => {
       },
     );
 
-    expect(result).toBeUndefined();
+    expect(result?.blocked?.reason).toBe("undeclared active scanner");
   });
 
   it("stops reusing an active scanner after its load path trust is removed", async () => {
     useNoBundledPlugins();
     const stateDir = makeTempDir();
     const workspaceDir = makeTempDir();
-    const scanner = writeBeforeInstallBlocker("removed-load-path-scanner");
+    const scanner = writeLabeledBeforeInstallBlocker(
+      "removed-load-path-scanner",
+      path.join(makeTempDir(), "removed-load-path-scanner"),
+      "removed load path scanner",
+      { activationHint: false },
+    );
     const enabledConfig = {
       agents: { defaults: { workspace: workspaceDir } },
       plugins: {

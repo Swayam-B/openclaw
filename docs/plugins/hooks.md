@@ -729,6 +729,10 @@ checks, but it is not the primary enterprise or host security boundary: a
 plugin cannot inspect its own first installation, and disabling the plugin
 disables its hook.
 
+For compatibility, an explicitly trusted plugin runtime that is already loaded
+can continue to provide `before_install` without the activation hint. The hint
+is required for OpenClaw to discover and cold-load the plugin before an install.
+
 The `builtinScan` field remains in the event payload for compatibility, but
 OpenClaw no longer runs built-in install-time dangerous-code blocking, so it
 is an empty `ok` result. Return additional findings or

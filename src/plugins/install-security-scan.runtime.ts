@@ -53,6 +53,7 @@ function resolveBeforeInstallHookRunner(params: {
   config: OpenClawConfig;
   disableAllPlugins: boolean;
   disabledPluginIds: ReadonlySet<string>;
+  eligibleLiveProviderIds: readonly string[];
   hookProviderIds: readonly string[];
   index: InstalledPluginIndex;
   logger: InstallScanLogger;
@@ -66,12 +67,14 @@ function resolveBeforeInstallHookRunner(params: {
       !params.disabledPluginIds.has(normalizedId)
     );
   };
-  const currentHookProviderIds = new Set(
-    params.hookProviderIds.map((pluginId) => normalizePluginPolicyId(pluginId)),
+  const currentLiveProviderIds = new Set(
+    [...params.hookProviderIds, ...params.eligibleLiveProviderIds].map((pluginId) =>
+      normalizePluginPolicyId(pluginId),
+    ),
   );
   const currentProviderById = new Map(
     params.index.plugins
-      .filter((plugin) => currentHookProviderIds.has(normalizePluginPolicyId(plugin.pluginId)))
+      .filter((plugin) => currentLiveProviderIds.has(normalizePluginPolicyId(plugin.pluginId)))
       .map((plugin) => [normalizePluginPolicyId(plugin.pluginId), plugin]),
   );
   const livePluginMatchesCurrentProvider = (
@@ -1254,6 +1257,7 @@ async function runBeforeInstallHook(params: {
       config,
       disableAllPlugins: !normalizedPlugins.enabled,
       disabledPluginIds,
+      eligibleLiveProviderIds: explicitlyEnabledPluginIds,
       hookProviderIds,
       index: pluginIndex,
       logger: params.logger,
