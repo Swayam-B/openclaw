@@ -81,6 +81,7 @@ export function resolveManifestActivationPlan(
         config: params.config,
         workspaceDir: params.workspaceDir,
         env: params.env,
+        pluginIds: params.onlyPluginIds,
         includeDisabled: true,
       });
   const normalizedConfig = normalizePluginsConfig(params.config?.plugins);

@@ -462,16 +462,16 @@ Every plugin should set `activation.onStartup` intentionally. Set it to `true` o
 }
 ```
 
-| Field              | Required | Type                                                 | What it means                                                                                                                                                                               |
-| ------------------ | -------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onStartup`        | No       | `boolean`                                            | Explicit Gateway startup activation. Every plugin should set this. `true` imports the plugin during startup; `false` keeps it startup-lazy unless another matched trigger requires loading. |
-| `onProviders`      | No       | `string[]`                                           | Provider ids that should include this plugin in activation/load plans.                                                                                                                      |
-| `onAgentHarnesses` | No       | `string[]`                                           | Embedded agent harness runtime ids that should include this plugin in activation/load plans. Use top-level `cliBackends` for CLI backend aliases.                                           |
-| `onCommands`       | No       | `string[]`                                           | Command ids that should include this plugin in activation/load plans.                                                                                                                       |
-| `onChannels`       | No       | `string[]`                                           | Channel ids that should include this plugin in activation/load plans.                                                                                                                       |
-| `onRoutes`         | No       | `string[]`                                           | Route kinds that should include this plugin in activation/load plans.                                                                                                                       |
-| `onConfigPaths`    | No       | `string[]`                                           | Root-relative config paths that should include this plugin in startup/load plans when the path is present and not explicitly disabled.                                                      |
-| `onCapabilities`   | No       | `Array<"provider" \| "channel" \| "tool" \| "hook">` | Broad capability hints used by control-plane activation planning. Prefer narrower fields when possible.                                                                                     |
+| Field              | Required | Type                                                 | What it means                                                                                                                                                                                 |
+| ------------------ | -------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onStartup`        | No       | `boolean`                                            | Explicit Gateway startup activation. Every plugin should set this. `true` imports the plugin during startup; `false` keeps it startup-lazy unless another matched trigger requires loading.   |
+| `onProviders`      | No       | `string[]`                                           | Provider ids that should include this plugin in activation/load plans.                                                                                                                        |
+| `onAgentHarnesses` | No       | `string[]`                                           | Embedded agent harness runtime ids that should include this plugin in activation/load plans. Use top-level `cliBackends` for CLI backend aliases.                                             |
+| `onCommands`       | No       | `string[]`                                           | Command ids that should include this plugin in activation/load plans.                                                                                                                         |
+| `onChannels`       | No       | `string[]`                                           | Channel ids that should include this plugin in activation/load plans.                                                                                                                         |
+| `onRoutes`         | No       | `string[]`                                           | Route kinds that should include this plugin in activation/load plans.                                                                                                                         |
+| `onConfigPaths`    | No       | `string[]`                                           | Root-relative config paths that should include this plugin in startup/load plans when the path is present and not explicitly disabled.                                                        |
+| `onCapabilities`   | No       | `Array<"provider" \| "channel" \| "tool" \| "hook">` | Broad capability hints used by control-plane activation planning. `"hook"` loads explicitly trusted hook-provider plugins before install-hook dispatch. Prefer narrower fields when possible. |
 
 Current live consumers:
 
@@ -481,6 +481,7 @@ Current live consumers:
 - Channel-triggered setup/channel planning falls back to legacy `channels[]` ownership when explicit channel activation metadata is missing.
 - Startup plugin planning uses `activation.onConfigPaths` for non-channel root config surfaces such as the bundled browser plugin's `browser` block.
 - Provider-triggered setup/runtime planning falls back to legacy `providers[]` and top-level `cliBackends[]` ownership when explicit provider activation metadata is missing.
+- Install-hook planning loads every explicitly trusted plugin that declares `activation.onCapabilities: ["hook"]` before `before_install` dispatch.
 
 Planner diagnostics can distinguish explicit activation hints from manifest ownership fallback. For example, `activation-command-hint` means `activation.onCommands` matched, while `manifest-command-alias` means the planner used `commandAliases` ownership instead. These reason labels are for host diagnostics and tests; plugin authors should keep declaring the metadata that best describes ownership.
 

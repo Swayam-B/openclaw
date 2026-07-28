@@ -98,7 +98,8 @@ function collectBundledChannelOwnerPluginIds(params: {
   return sortUniqueStrings(pluginIds);
 }
 
-function collectExplicitEffectivePluginIds(config: OpenClawConfig): string[] {
+/** Lists plugin ids explicitly enabled through allowlist or entry config. */
+export function resolveExplicitEffectivePluginIds(config: OpenClawConfig): string[] {
   const plugins = normalizePluginsConfig(config.plugins);
   if (!plugins.enabled) {
     return [];
@@ -154,7 +155,7 @@ export function resolveEffectivePluginIds(params: {
     env: params.env,
   });
   const effectiveConfig = autoEnabled.config;
-  const ids = new Set(collectExplicitEffectivePluginIds(effectiveConfig));
+  const ids = new Set(resolveExplicitEffectivePluginIds(effectiveConfig));
   for (const pluginId of collectSelectedContextEnginePluginIds(effectiveConfig)) {
     ids.add(pluginId);
   }

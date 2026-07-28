@@ -331,6 +331,69 @@ describe("activation planner", () => {
     ).toEqual(["demo-channel"]);
   });
 
+  it("plans every explicitly trusted hook-capability plugin", () => {
+    mocks.loadPluginManifestRegistryForPluginRegistry.mockReturnValue({
+      plugins: [
+        {
+          id: "scanner-b",
+          providers: [],
+          channels: [],
+          cliBackends: [],
+          skills: [],
+          hooks: [],
+          activation: { onCapabilities: ["hook"] },
+          origin: "global",
+        },
+        {
+          id: "scanner-a",
+          providers: [],
+          channels: [],
+          cliBackends: [],
+          skills: [],
+          hooks: [],
+          activation: { onCapabilities: ["hook"] },
+          origin: "global",
+        },
+        {
+          id: "scanner-disabled",
+          providers: [],
+          channels: [],
+          cliBackends: [],
+          skills: [],
+          hooks: [],
+          activation: { onCapabilities: ["hook"] },
+          origin: "global",
+        },
+      ],
+      diagnostics: [],
+    });
+
+    expect(
+      resolveManifestActivationPluginIds({
+        config: {
+          plugins: {
+            entries: {
+              "scanner-a": { enabled: true },
+              "scanner-b": { enabled: true },
+              "scanner-disabled": { enabled: false },
+            },
+          },
+        },
+        onlyPluginIds: ["scanner-a", "scanner-b", "scanner-disabled"],
+        requireExplicitManifestOwnerTrust: true,
+        trigger: {
+          kind: "capability",
+          capability: "hook",
+        },
+      }),
+    ).toEqual(["scanner-a", "scanner-b"]);
+    expect(mocks.loadPluginManifestRegistryForPluginRegistry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pluginIds: ["scanner-a", "scanner-b", "scanner-disabled"],
+      }),
+    );
+  });
+
   it("returns a richer activation plan with planner-hint reasons", () => {
     expect(
       resolveManifestActivationPlan({

@@ -69,6 +69,8 @@ narrow plugin loading before broader registry materialization:
   channel id
 - explicit provider setup/runtime resolution narrows to plugins that own the
   requested provider id
+- install-hook dispatch narrows to explicitly trusted plugins that declare the
+  broad `hook` activation capability
 - Gateway startup planning uses `activation.onStartup` for explicit startup
   imports; plugins without startup metadata load only through narrower
   activation triggers

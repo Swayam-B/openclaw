@@ -14,6 +14,7 @@ import {
   type InstallPolicySource,
 } from "../security/install-policy.js";
 import { isPathInside } from "../security/scan-paths.js";
+import { resolveManifestActivationPluginIds } from "./activation-planner.js";
 import {
   findBlockedManifestDependencies,
   findBlockedNodeModulesDirectory,
@@ -23,9 +24,11 @@ import {
   type BlockedPackageDirectoryFinding,
   type BlockedPackageFileFinding,
 } from "./dependency-denylist.js";
+import { resolveExplicitEffectivePluginIds } from "./effective-plugin-ids.js";
 import { getGlobalHookRunner } from "./hook-runner-global.js";
 import { createBeforeInstallHookPayload } from "./install-policy-context.js";
 import type { InstallSafetyOverrides } from "./install-security-scan.types.js";
+import { ensurePluginRegistryLoaded } from "./runtime/runtime-registry-loader.js";
 
 type InstallScanLogger = {
   warn?: (message: string) => void;
@@ -698,6 +701,7 @@ async function scanPluginDependencyDenylist(params: {
 }
 
 async function runBeforeInstallHook(params: {
+  config?: OpenClawConfig;
   logger: InstallScanLogger;
   installLabel: string;
   origin: string;
@@ -723,12 +727,30 @@ async function runBeforeInstallHook(params: {
     extensions?: string[];
   };
 }): Promise<InstallSecurityScanResult | undefined> {
-  const hookRunner = getGlobalHookRunner();
-  if (!hookRunner?.hasHooks("before_install")) {
-    return undefined;
-  }
-
   try {
+    const explicitlyEnabledPluginIds = resolveExplicitEffectivePluginIds(params.config ?? {});
+    if (explicitlyEnabledPluginIds.length > 0) {
+      const hookProviderIds = resolveManifestActivationPluginIds({
+        config: params.config,
+        onlyPluginIds: explicitlyEnabledPluginIds,
+        requireExplicitManifestOwnerTrust: true,
+        trigger: {
+          kind: "capability",
+          capability: "hook",
+        },
+      });
+      if (hookProviderIds.length > 0) {
+        ensurePluginRegistryLoaded({
+          config: params.config,
+          onlyPluginIds: hookProviderIds,
+        });
+      }
+    }
+    const hookRunner = getGlobalHookRunner();
+    if (!hookRunner?.hasHooks("before_install")) {
+      return undefined;
+    }
+
     const { event, ctx } = createBeforeInstallHookPayload({
       targetName: params.targetName,
       targetType: params.targetType,
@@ -938,16 +960,15 @@ export async function scanBundleInstallSourceRuntime(
         ...(params.version ? { version: params.version } : {}),
       },
     });
-  if (shouldBypassOpenClawInstallFriction({ source: params.source })) {
-    return await runPolicy();
-  }
-  const dependencyBlocked = await scanPluginDependencyDenylist({
-    logger: params.logger,
-    packageDir: params.sourceDir,
-    targetLabel: `Bundle "${params.pluginId}" installation`,
-  });
-  if (dependencyBlocked) {
-    return dependencyBlocked;
+  if (!shouldBypassOpenClawInstallFriction({ source: params.source })) {
+    const dependencyBlocked = await scanPluginDependencyDenylist({
+      logger: params.logger,
+      packageDir: params.sourceDir,
+      targetLabel: `Bundle "${params.pluginId}" installation`,
+    });
+    if (dependencyBlocked) {
+      return dependencyBlocked;
+    }
   }
 
   const policyResult = await runPolicy();
@@ -956,6 +977,7 @@ export async function scanBundleInstallSourceRuntime(
   }
 
   const hookResult = await runBeforeInstallHook({
+    config: params.config,
     logger: params.logger,
     installLabel: `Bundle "${params.pluginId}" installation`,
     origin: "plugin-bundle",
@@ -1022,20 +1044,19 @@ export async function scanPackageInstallSourceRuntime(
       },
     });
   if (
-    shouldBypassOpenClawInstallFriction({
+    !shouldBypassOpenClawInstallFriction({
       source: params.source,
       trustedSourceLinkedOfficialInstall: params.trustedSourceLinkedOfficialInstall,
     })
   ) {
-    return await runPolicy();
-  }
-  const dependencyBlocked = await scanPluginDependencyDenylist({
-    logger: params.logger,
-    packageDir: params.packageDir,
-    targetLabel: `Plugin "${params.pluginId}" installation`,
-  });
-  if (dependencyBlocked) {
-    return dependencyBlocked;
+    const dependencyBlocked = await scanPluginDependencyDenylist({
+      logger: params.logger,
+      packageDir: params.packageDir,
+      targetLabel: `Plugin "${params.pluginId}" installation`,
+    });
+    if (dependencyBlocked) {
+      return dependencyBlocked;
+    }
   }
 
   const policyResult = await runPolicy();
@@ -1044,6 +1065,7 @@ export async function scanPackageInstallSourceRuntime(
   }
 
   const hookResult = await runBeforeInstallHook({
+    config: params.config,
     logger: params.logger,
     installLabel: `Plugin "${params.pluginId}" installation`,
     origin: "plugin-package",
@@ -1167,6 +1189,7 @@ export async function scanFileInstallSourceRuntime(
   }
 
   const hookResult = await runBeforeInstallHook({
+    config: params.config,
     logger: params.logger,
     installLabel: `Plugin file "${params.pluginId}" installation`,
     origin: "plugin-file",
@@ -1278,15 +1301,13 @@ export async function evaluateSkillInstallPolicyRuntime(params: {
         ...(params.installSpec ? { installSpec: params.installSpec } : {}),
       },
     });
-  if (shouldBypassOpenClawInstallFriction({ source: params.source })) {
-    return await runPolicy();
-  }
   const policyResult = await runPolicy();
   if (policyResult?.blocked) {
     return policyResult;
   }
 
   const hookResult = await runBeforeInstallHook({
+    config: params.config,
     logger: params.logger,
     installLabel: `Skill "${params.skillName}" installation`,
     origin: formatInstallPolicyOriginForHook(params.origin),

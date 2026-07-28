@@ -184,7 +184,7 @@ For `sessions.create` calls with `parentSessionKey` and `emitCommandHooks: true`
 | `deactivate`                     | Deprecated compatibility alias for `gateway_stop`; use `gateway_stop` in new plugins                 |
 | `cron_reconciled`                | Reconcile against the complete Gateway cron state after startup or reload                            |
 | `cron_changed`                   | Observe Gateway-owned cron lifecycle changes (added, updated, removed, started, finished, scheduled) |
-| **`before_install`**             | Inspect staged skill or plugin install material from a loaded plugin runtime                         |
+| **`before_install`**             | Inspect staged skill or plugin install material before install or update continues                   |
 
 ### Channel pairing requests
 
@@ -719,15 +719,22 @@ Use `security.installPolicy` for operator-owned allow/block decisions. That
 policy runs from OpenClaw config, covers CLI install and update paths, and
 fails closed when enabled but unavailable.
 
-`before_install` is a plugin-runtime lifecycle hook. It runs after
-`security.installPolicy` only in the OpenClaw process where plugin hooks have
-already been loaded, such as Gateway-backed install flows. It is useful for
-plugin-owned observations, warnings, and compatibility checks, but it is not
-the primary enterprise or host security boundary for installs. The
-`builtinScan` field remains in the event payload for compatibility, but
+`before_install` is a plugin-runtime lifecycle hook. A plugin that needs it on
+CLI and Gateway-backed install/update paths must declare
+`activation.onCapabilities: ["hook"]` in `openclaw.plugin.json` and be
+explicitly trusted by plugin config. OpenClaw loads every matching plugin
+before dispatch, after `security.installPolicy` and after the staged source is
+available. It is useful for plugin-owned scanning, warnings, and compatibility
+checks, but it is not the primary enterprise or host security boundary: a
+plugin cannot inspect its own first installation, and disabling the plugin
+disables its hook.
+
+The `builtinScan` field remains in the event payload for compatibility, but
 OpenClaw no longer runs built-in install-time dangerous-code blocking, so it
 is an empty `ok` result. Return additional findings or
-`{ block: true, blockReason }` to stop the install in that process.
+`{ block: true, blockReason }` to stop the install. Multiple handlers run from
+higher to lower priority, accumulate findings, and stop after the first
+`block: true`.
 
 `block: true` is terminal. `block: false` is treated as no decision. Handler
 failures block the install fail-closed.

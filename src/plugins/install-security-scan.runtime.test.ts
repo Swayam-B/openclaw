@@ -7,6 +7,8 @@ const findBlockedNodeModulesFileAliasMock = vi.fn();
 const findBlockedPackageDirectoryInPathMock = vi.fn();
 const findBlockedPackageFileAliasInPathMock = vi.fn();
 const getGlobalHookRunnerMock = vi.fn();
+const resolveManifestActivationPluginIdsMock = vi.fn();
+const ensurePluginRegistryLoadedMock = vi.fn();
 
 vi.mock("../security/install-policy.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../security/install-policy.js")>();
@@ -37,21 +39,30 @@ vi.mock("./hook-runner-global.js", () => ({
   getGlobalHookRunner: () => getGlobalHookRunnerMock(),
 }));
 
+vi.mock("./activation-planner.js", () => ({
+  resolveManifestActivationPluginIds: (...args: unknown[]) =>
+    resolveManifestActivationPluginIdsMock(...args),
+}));
+
+vi.mock("./runtime/runtime-registry-loader.js", () => ({
+  ensurePluginRegistryLoaded: (...args: unknown[]) => ensurePluginRegistryLoadedMock(...args),
+}));
+
 const {
   evaluateSkillInstallPolicyRuntime,
   preflightPluginNpmInstallPolicyRuntime,
   scanBundleInstallSourceRuntime,
   scanFileInstallSourceRuntime,
+  scanPackageInstallSourceRuntime,
 } = await import("./install-security-scan.runtime.js");
 
-function expectOnlyOperatorPolicyRan() {
+function expectBuiltinInstallFrictionBypassed() {
   expect(runInstallPolicyMock).toHaveBeenCalledTimes(1);
   expect(findBlockedManifestDependenciesMock).not.toHaveBeenCalled();
   expect(findBlockedNodeModulesDirectoryMock).not.toHaveBeenCalled();
   expect(findBlockedNodeModulesFileAliasMock).not.toHaveBeenCalled();
   expect(findBlockedPackageDirectoryInPathMock).not.toHaveBeenCalled();
   expect(findBlockedPackageFileAliasInPathMock).not.toHaveBeenCalled();
-  expect(getGlobalHookRunnerMock).not.toHaveBeenCalled();
 }
 
 beforeEach(() => {
@@ -62,10 +73,17 @@ beforeEach(() => {
   findBlockedPackageDirectoryInPathMock.mockReset();
   findBlockedPackageFileAliasInPathMock.mockReset();
   getGlobalHookRunnerMock.mockReset();
+  resolveManifestActivationPluginIdsMock.mockReset();
+  resolveManifestActivationPluginIdsMock.mockReturnValue([]);
+  ensurePluginRegistryLoadedMock.mockReset();
 });
 
 describe("install security scan official bypass", () => {
-  it("bypasses plugin install friction for bundled OpenClaw sources", async () => {
+  it("bypasses built-in friction but still runs hooks for bundled OpenClaw sources", async () => {
+    const hasHooks = vi.fn().mockReturnValue(true);
+    const runBeforeInstall = vi.fn().mockResolvedValue(undefined);
+    getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
+
     const result = await scanBundleInstallSourceRuntime({
       logger: {},
       pluginId: "openclaw/kitchen-sink",
@@ -74,10 +92,19 @@ describe("install security scan official bypass", () => {
     });
 
     expect(result).toBeUndefined();
-    expectOnlyOperatorPolicyRan();
+    expectBuiltinInstallFrictionBypassed();
+    expect(resolveManifestActivationPluginIdsMock).not.toHaveBeenCalled();
+    expect(runBeforeInstall).toHaveBeenCalledOnce();
   });
 
-  it("bypasses plugin install friction for official ClawHub sources", async () => {
+  it("bypasses built-in friction but still lets hooks block official ClawHub sources", async () => {
+    const hasHooks = vi.fn().mockReturnValue(true);
+    const runBeforeInstall = vi.fn().mockResolvedValue({
+      block: true,
+      blockReason: "scanner rejected source",
+    });
+    getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
+
     const result = await scanBundleInstallSourceRuntime({
       logger: {},
       pluginId: "@openclaw/matrix",
@@ -85,11 +112,20 @@ describe("install security scan official bypass", () => {
       source: { kind: "clawhub", authority: "official", mutable: false, network: true },
     });
 
-    expect(result).toBeUndefined();
-    expectOnlyOperatorPolicyRan();
+    expect(result).toEqual({
+      blocked: {
+        code: "security_scan_blocked",
+        reason: "scanner rejected source",
+      },
+    });
+    expectBuiltinInstallFrictionBypassed();
   });
 
-  it("bypasses skill install friction for bundled OpenClaw sources", async () => {
+  it("bypasses built-in friction but still runs hooks for bundled OpenClaw skills", async () => {
+    const hasHooks = vi.fn().mockReturnValue(true);
+    const runBeforeInstall = vi.fn().mockResolvedValue(undefined);
+    getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
+
     const result = await evaluateSkillInstallPolicyRuntime({
       installId: "node",
       logger: {},
@@ -104,7 +140,27 @@ describe("install security scan official bypass", () => {
     });
 
     expect(result).toBeUndefined();
-    expectOnlyOperatorPolicyRan();
+    expectBuiltinInstallFrictionBypassed();
+    expect(runBeforeInstall).toHaveBeenCalledOnce();
+  });
+
+  it("bypasses built-in friction but still runs hooks for official package sources", async () => {
+    const hasHooks = vi.fn().mockReturnValue(true);
+    const runBeforeInstall = vi.fn().mockResolvedValue(undefined);
+    getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
+
+    const result = await scanPackageInstallSourceRuntime({
+      extensions: ["index.js"],
+      logger: {},
+      packageDir: "/tmp/openclaw-official-package",
+      pluginId: "matrix",
+      source: { kind: "npm", authority: "official", mutable: false, network: true },
+      trustedSourceLinkedOfficialInstall: true,
+    });
+
+    expect(result).toBeUndefined();
+    expectBuiltinInstallFrictionBypassed();
+    expect(runBeforeInstall).toHaveBeenCalledOnce();
   });
 
   it("runs only operator policy for official immutable npm sources", async () => {
@@ -118,7 +174,8 @@ describe("install security scan official bypass", () => {
     });
 
     expect(result).toBeUndefined();
-    expectOnlyOperatorPolicyRan();
+    expectBuiltinInstallFrictionBypassed();
+    expect(getGlobalHookRunnerMock).not.toHaveBeenCalled();
   });
 
   it("lets operator policy block official sources", async () => {
@@ -142,7 +199,9 @@ describe("install security scan official bypass", () => {
         reason: "blocked by operator policy",
       },
     });
-    expectOnlyOperatorPolicyRan();
+    expectBuiltinInstallFrictionBypassed();
+    expect(resolveManifestActivationPluginIdsMock).not.toHaveBeenCalled();
+    expect(getGlobalHookRunnerMock).not.toHaveBeenCalled();
   });
 
   it("still runs install policy for mutable workspace skill sources", async () => {
@@ -177,6 +236,72 @@ describe("install security scan official bypass", () => {
 });
 
 describe("legacy file install scan compatibility", () => {
+  it("loads every trusted hook-capability plugin before dispatch", async () => {
+    const config = {
+      plugins: {
+        entries: {
+          "scanner-a": { enabled: true },
+          "scanner-b": { enabled: true },
+        },
+      },
+    };
+    resolveManifestActivationPluginIdsMock.mockReturnValue(["scanner-a", "scanner-b"]);
+    const hasHooks = vi.fn().mockReturnValue(true);
+    const runBeforeInstall = vi.fn().mockResolvedValue(undefined);
+    getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
+
+    await scanFileInstallSourceRuntime({
+      config,
+      filePath: "/tmp/payload.js",
+      logger: {},
+      pluginId: "payload",
+    });
+
+    expect(resolveManifestActivationPluginIdsMock).toHaveBeenCalledWith({
+      config,
+      onlyPluginIds: ["scanner-a", "scanner-b"],
+      requireExplicitManifestOwnerTrust: true,
+      trigger: {
+        kind: "capability",
+        capability: "hook",
+      },
+    });
+    expect(ensurePluginRegistryLoadedMock).toHaveBeenCalledWith({
+      config,
+      onlyPluginIds: ["scanner-a", "scanner-b"],
+    });
+    expect(runBeforeInstall).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when a declared hook provider cannot load", async () => {
+    resolveManifestActivationPluginIdsMock.mockReturnValue(["scanner"]);
+    ensurePluginRegistryLoadedMock.mockImplementation(() => {
+      throw new Error("scanner runtime unavailable");
+    });
+
+    const result = await scanFileInstallSourceRuntime({
+      config: {
+        plugins: {
+          entries: {
+            scanner: { enabled: true },
+          },
+        },
+      },
+      filePath: "/tmp/payload.js",
+      logger: {},
+      pluginId: "payload",
+    });
+
+    expect(result).toEqual({
+      blocked: {
+        code: "security_scan_failed",
+        reason:
+          "Installation blocked because before_install hook failed: scanner runtime unavailable",
+      },
+    });
+    expect(getGlobalHookRunnerMock).not.toHaveBeenCalled();
+  });
+
   it("preserves policy and hook metadata for published lazy install chunks", async () => {
     const warnings: string[] = [];
     const hasHooks = vi.fn().mockReturnValue(true);
