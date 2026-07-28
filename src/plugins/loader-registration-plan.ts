@@ -91,7 +91,7 @@ export function resolvePluginRegistrationPlan(params: {
     mode,
     loadSetupEntry: false,
     loadSetupRuntimeEntry: false,
-    runRuntimeCapabilityPolicy: true,
+    runRuntimeCapabilityPolicy: mode !== "install-scan",
     runFullActivationOnlyRegistrations: mode === "full",
   };
 }

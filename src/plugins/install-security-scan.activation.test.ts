@@ -35,13 +35,14 @@ import { ensurePluginRegistryLoaded } from "./runtime/runtime-registry-loader.js
 function writeBeforeInstallBlocker(
   id: string,
   dir?: string,
-  options: { installScanRegistrationOnly?: boolean } = {},
+  options: { fullRegistrationOnly?: boolean; installScanRegistrationOnly?: boolean } = {},
 ) {
   const plugin = writePlugin({
     id,
     ...(dir ? { dir } : {}),
     filename: dir ? "index.cjs" : `${id}.cjs`,
     body: `module.exports = { id: ${JSON.stringify(id)}, register(api) {
+      ${options.fullRegistrationOnly ? 'if (api.registrationMode !== "full") return;' : ""}
       ${options.installScanRegistrationOnly ? 'if (api.registrationMode !== "install-scan") return;' : ""}
       api.on("before_install", (event) => ({
         block: true,
@@ -200,6 +201,68 @@ describe("install hook provider activation", () => {
       async () =>
         await scanFileInstallSourceRuntime({
           config,
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        }),
+    );
+
+    expect(result?.blocked?.reason).toBe("blocked staged target payload");
+  });
+
+  it("fails closed when a declared provider omits its install-scan registration", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const scanner = writeBeforeInstallBlocker("full-only-scanner", undefined, {
+      fullRegistrationOnly: true,
+    });
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () =>
+        await scanFileInstallSourceRuntime({
+          config: { plugins: { load: { paths: [scanner.file] } } },
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        }),
+    );
+
+    expect(result?.blocked).toEqual({
+      code: "security_scan_failed",
+      reason: expect.stringContaining(
+        "hook providers did not register before_install in install-scan mode: full-only-scanner",
+      ),
+    });
+  });
+
+  it("loads a memory-capable scanner even when another plugin owns the memory slot", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const scanner = writeBeforeInstallBlocker("memory-scanner");
+    const manifestPath = path.join(scanner.dir, "openclaw.plugin.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+    manifest.kind = "memory";
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () =>
+        await scanFileInstallSourceRuntime({
+          config: {
+            plugins: {
+              allow: [scanner.id],
+              entries: { [scanner.id]: { enabled: true } },
+              load: { paths: [scanner.file] },
+              slots: { memory: "memory-core" },
+            },
+          },
           filePath: path.join(makeTempDir(), "payload.js"),
           logger: {},
           pluginId: "payload",

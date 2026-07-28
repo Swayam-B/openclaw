@@ -212,12 +212,12 @@ Callbacks run per registration mode (full table under
   so root help stays non-activating, discovery snapshots include static
   command metadata, and normal CLI registration stays compatible with full
   plugin loads.
-- `registerFull` runs only for `"full"` and `"tool-discovery"`. For
-  `"tool-discovery"` it runs _instead of_ channel registration: OpenClaw
-  skips `registerChannel`/`setRuntime` entirely and calls only
-  `registerFull`, so any provider/tool registration your channel needs for
-  standalone tool discovery or execution must live there, not behind normal
-  channel setup.
+- `registerFull` runs for `"full"` and the non-live `"tool-discovery"` /
+  `"install-scan"` capability modes. In either non-live mode it runs _instead
+  of_ channel registration: OpenClaw skips `registerChannel`/`setRuntime` and
+  calls only `registerFull`. Keep that callback safe for read-only discovery;
+  any install-policy hook or provider/tool registration needed in these
+  capability modes must live there, not behind normal channel setup.
 - Discovery registration is non-activating, not import-free: OpenClaw may
   evaluate the trusted plugin entry and channel plugin module to build the
   snapshot. Keep top-level imports side-effect-free and put sockets,

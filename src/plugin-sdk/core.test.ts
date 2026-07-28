@@ -75,6 +75,29 @@ describe("defineChannelPluginEntry", () => {
     expect(api.registerTool).toHaveBeenCalledTimes(1);
   });
 
+  it("runs non-live capability registrations without channel wiring during install scans", () => {
+    const setRuntime = vi.fn<(runtime: PluginRuntime) => void>();
+    const registerCliMetadata = vi.fn<(api: OpenClawPluginApi) => void>();
+    const registerFull = vi.fn<(api: OpenClawPluginApi) => void>();
+    const entry = defineChannelPluginEntry({
+      id: "install-scanner",
+      name: "Install Scanner",
+      description: "install scanner test",
+      plugin: createChannelPlugin("install-scanner"),
+      setRuntime,
+      registerCliMetadata,
+      registerFull,
+    });
+
+    const api = createApi("install-scan");
+    entry.register(api);
+
+    expect(api.registerChannel).not.toHaveBeenCalled();
+    expect(setRuntime).not.toHaveBeenCalled();
+    expect(registerCliMetadata).not.toHaveBeenCalled();
+    expect(registerFull).toHaveBeenCalledWith(api);
+  });
+
   it("wires runtime helpers during discovery registration", () => {
     const setRuntime = vi.fn<(runtime: PluginRuntime) => void>();
     const registerCliMetadata = vi.fn<(api: OpenClawPluginApi) => void>();

@@ -130,11 +130,19 @@ beforeEach(() => {
   loadPluginRegistrySnapshotMock.mockReset();
   loadPluginRegistrySnapshotMock.mockReturnValue({ diagnostics: [], plugins: [] });
   loadIsolatedPluginRegistryMock.mockReset();
-  loadIsolatedPluginRegistryMock.mockReturnValue({
-    hooks: [],
-    plugins: [],
-    typedHooks: [],
-  });
+  loadIsolatedPluginRegistryMock.mockImplementation(
+    (options: { onlyPluginIds?: readonly string[] } = {}) => ({
+      hooks: [],
+      plugins: (options.onlyPluginIds ?? []).map((id) => ({ id, status: "loaded" })),
+      typedHooks: (options.onlyPluginIds ?? []).map((pluginId) => ({
+        handler: vi.fn(),
+        hookName: "before_install",
+        pluginId,
+        priority: 0,
+        source: "test",
+      })),
+    }),
+  );
   readPersistedInstalledPluginIndexSyncMock.mockReset();
   readPersistedInstalledPluginIndexSyncMock.mockReturnValue(null);
 });

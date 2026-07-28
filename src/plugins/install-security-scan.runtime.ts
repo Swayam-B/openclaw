@@ -166,6 +166,22 @@ function resolveBeforeInstallHookRunner(params: {
           onlyPluginIds: hookProviderIdsToLoad,
         })
       : undefined;
+  const isolatedBeforeInstallProviderIds = new Set([
+    ...(isolatedRegistry?.typedHooks
+      .filter((hook) => hook.hookName === "before_install")
+      .map((hook) => normalizePluginPolicyId(hook.pluginId)) ?? []),
+    ...(isolatedRegistry?.hooks
+      .filter((hook) => hook.events.includes("before_install"))
+      .map((hook) => normalizePluginPolicyId(hook.pluginId)) ?? []),
+  ]);
+  const missingIsolatedProviders = hookProviderIdsToLoad.filter(
+    (pluginId) => !isolatedBeforeInstallProviderIds.has(normalizePluginPolicyId(pluginId)),
+  );
+  if (missingIsolatedProviders.length > 0) {
+    throw new Error(
+      `hook providers did not register before_install in install-scan mode: ${missingIsolatedProviders.join(", ")}`,
+    );
+  }
   if (!isolatedRegistry && !globalRegistry) {
     return null;
   }

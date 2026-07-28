@@ -590,7 +590,7 @@ export function defineChannelPluginEntry<TPlugin>({
         registerCliMetadata?.(api);
         return;
       }
-      if (api.registrationMode === "tool-discovery") {
+      if (api.registrationMode === "install-scan" || api.registrationMode === "tool-discovery") {
         registerFull?.(api);
         return;
       }
