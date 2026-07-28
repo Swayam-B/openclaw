@@ -190,6 +190,12 @@ function resolveBeforeInstallHookRunner(params: {
   );
   const includeGlobalPlugin = (pluginId: string) => {
     const normalizedId = normalizePluginPolicyId(pluginId);
+    if (
+      isolatedGlobalRegistry &&
+      hookOwnerByPluginId.get(normalizedId) === isolatedGlobalRegistry
+    ) {
+      return true;
+    }
     return passesCurrentPolicy(normalizedId) && !isolatedPluginIds.has(normalizedId);
   };
   const registry: GlobalHookRunnerRegistry = {

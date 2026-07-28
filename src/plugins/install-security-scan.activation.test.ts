@@ -665,7 +665,7 @@ describe("install hook provider activation", () => {
     expect(result).toBeUndefined();
   });
 
-  it("preserves an explicitly initialized SDK install gate beside an active registry", async () => {
+  it("preserves an explicitly initialized SDK install gate outside plugin policy", async () => {
     useNoBundledPlugins();
     const stateDir = makeTempDir();
     const workspaceDir = makeTempDir();
@@ -690,7 +690,14 @@ describe("install hook provider activation", () => {
       },
       async () =>
         await scanFileInstallSourceRuntime({
-          config: { agents: { defaults: { workspace: workspaceDir } } },
+          config: {
+            agents: { defaults: { workspace: workspaceDir } },
+            plugins: {
+              enabled: false,
+              allow: ["other"],
+              deny: ["sdk-install-gate"],
+            },
+          },
           filePath: path.join(makeTempDir(), "payload.js"),
           logger: {},
           pluginId: "payload",

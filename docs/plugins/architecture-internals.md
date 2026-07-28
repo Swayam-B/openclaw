@@ -70,7 +70,7 @@ narrow plugin loading before broader registry materialization:
 - explicit provider setup/runtime resolution narrows to plugins that own the
   requested provider id
 - install-hook dispatch narrows to explicitly trusted plugins that declare the
-  broad `hook` activation capability
+  `before_install` hook activation trigger
 - Gateway startup planning uses `activation.onStartup` for explicit startup
   imports; plugins without startup metadata load only through narrower
   activation triggers
