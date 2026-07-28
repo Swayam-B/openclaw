@@ -32,6 +32,7 @@ import { getGlobalHookRunner } from "./hook-runner-global.js";
 import { createHookRunner, type HookRunner } from "./hooks.js";
 import { createBeforeInstallHookPayload } from "./install-policy-context.js";
 import type { InstallSafetyOverrides } from "./install-security-scan.types.js";
+import { readPersistedInstalledPluginIndexSync } from "./installed-plugin-index-store.js";
 import { normalizePluginPolicyId } from "./plugin-policy-id.js";
 import { loadPluginRegistrySnapshot } from "./plugin-registry-snapshot.js";
 import { loadIsolatedPluginRegistry } from "./runtime/runtime-registry-loader.js";
@@ -796,8 +797,39 @@ async function runBeforeInstallHook(params: {
     const workspaceDir =
       params.workspaceDir ?? resolveAgentWorkspaceDir(config, resolveDefaultAgentId(config));
     const pluginIndex = loadPluginRegistrySnapshot({ config, workspaceDir });
+    const currentErrorPluginIds = new Set(
+      (pluginIndex.diagnostics ?? []).flatMap((diagnostic) =>
+        diagnostic.level === "error" && diagnostic.pluginId
+          ? [normalizePluginPolicyId(diagnostic.pluginId)]
+          : [],
+      ),
+    );
+    const persistedPluginIndex =
+      currentErrorPluginIds.size > 0
+        ? readPersistedInstalledPluginIndexSync({ env: process.env })
+        : null;
+    const recoveredHookProviderRecords =
+      persistedPluginIndex?.plugins.filter((plugin) => {
+        if (!currentErrorPluginIds.has(normalizePluginPolicyId(plugin.pluginId))) {
+          return false;
+        }
+        return (
+          plugin.startup.activationCapabilities?.includes("hook") ||
+          (plugin.startup.activationCapabilities === undefined &&
+            plugin.compat.includes("activation-capability-hint"))
+        );
+      }) ?? [];
+    const pluginRecords = new Map(
+      recoveredHookProviderRecords.map((plugin) => [
+        normalizePluginPolicyId(plugin.pluginId),
+        plugin,
+      ]),
+    );
+    for (const plugin of pluginIndex.plugins) {
+      pluginRecords.set(normalizePluginPolicyId(plugin.pluginId), plugin);
+    }
     const explicitlyEnabledPluginIds = resolveExplicitEffectivePluginIds(config, {
-      pluginRecords: pluginIndex.plugins,
+      pluginRecords: [...pluginRecords.values()],
     });
     let hookProviderIds: readonly string[] = [];
     if (explicitlyEnabledPluginIds.length > 0) {
@@ -812,8 +844,13 @@ async function runBeforeInstallHook(params: {
         },
       });
       const hookProviderCandidateIds = new Set(
-        pluginIndex.plugins
-          .filter((plugin) => plugin.startup?.activationCapabilities?.includes("hook"))
+        [...pluginRecords.values()]
+          .filter(
+            (plugin) =>
+              plugin.startup?.activationCapabilities?.includes("hook") ||
+              (plugin.startup?.activationCapabilities === undefined &&
+                plugin.compat?.includes("activation-capability-hint")),
+          )
           .map((plugin) => normalizePluginPolicyId(plugin.pluginId)),
       );
       for (const entry of activationPlan.entries) {

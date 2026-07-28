@@ -12,6 +12,7 @@ const createHookRunnerMock = vi.fn();
 const resolveManifestActivationPlanMock = vi.fn();
 const loadPluginRegistrySnapshotMock = vi.fn();
 const loadIsolatedPluginRegistryMock = vi.fn();
+const readPersistedInstalledPluginIndexSyncMock = vi.fn();
 
 vi.mock("../security/install-policy.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../security/install-policy.js")>();
@@ -58,6 +59,11 @@ vi.mock("./plugin-registry-snapshot.js", () => ({
   loadPluginRegistrySnapshot: (...args: unknown[]) => loadPluginRegistrySnapshotMock(...args),
 }));
 
+vi.mock("./installed-plugin-index-store.js", () => ({
+  readPersistedInstalledPluginIndexSync: (...args: unknown[]) =>
+    readPersistedInstalledPluginIndexSyncMock(...args),
+}));
+
 vi.mock("./runtime/runtime-registry-loader.js", () => ({
   loadIsolatedPluginRegistry: (...args: unknown[]) => loadIsolatedPluginRegistryMock(...args),
 }));
@@ -99,13 +105,15 @@ beforeEach(() => {
     trigger: { kind: "capability", capability: "hook" },
   });
   loadPluginRegistrySnapshotMock.mockReset();
-  loadPluginRegistrySnapshotMock.mockReturnValue({ plugins: [] });
+  loadPluginRegistrySnapshotMock.mockReturnValue({ diagnostics: [], plugins: [] });
   loadIsolatedPluginRegistryMock.mockReset();
   loadIsolatedPluginRegistryMock.mockReturnValue({
     hooks: [],
     plugins: [],
     typedHooks: [],
   });
+  readPersistedInstalledPluginIndexSyncMock.mockReset();
+  readPersistedInstalledPluginIndexSyncMock.mockReturnValue(null);
 });
 
 describe("install security scan official bypass", () => {
@@ -485,6 +493,62 @@ describe("legacy file install scan compatibility", () => {
     });
     expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
     expect(getGlobalHookRunnerMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a persisted scanner record is dropped after its manifest breaks", async () => {
+    loadPluginRegistrySnapshotMock.mockReturnValue({
+      diagnostics: [
+        {
+          level: "error",
+          message: "scanner manifest could not be parsed",
+          pluginId: "scanner",
+        },
+      ],
+      plugins: [],
+    });
+    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
+      plugins: [
+        {
+          compat: ["activation-capability-hint"],
+          origin: "global",
+          pluginId: "scanner",
+          startup: { activationCapabilities: ["hook"] },
+        },
+      ],
+    });
+    resolveManifestActivationPlanMock.mockReturnValue({
+      diagnostics: [
+        {
+          level: "error",
+          message: "scanner manifest could not be parsed",
+          pluginId: "scanner",
+        },
+      ],
+      entries: [],
+      pluginIds: [],
+      trigger: { kind: "capability", capability: "hook" },
+    });
+
+    const result = await scanFileInstallSourceRuntime({
+      config: {
+        plugins: {
+          entries: {
+            scanner: { enabled: true },
+          },
+        },
+      },
+      filePath: "/tmp/payload.js",
+      logger: {},
+      pluginId: "payload",
+    });
+
+    expect(result).toEqual({
+      blocked: {
+        code: "security_scan_failed",
+        reason:
+          "Installation blocked because before_install hook failed: hook provider manifest discovery failed: scanner manifest could not be parsed",
+      },
+    });
   });
 
   it("ignores unowned manifest errors when another plugin provides hooks", async () => {
