@@ -37,14 +37,14 @@ describe("llm-task doctor contract", () => {
       llm: {
         allowModelOverride: true,
         allowAuthProfileOverride: true,
-        allowedModels: ["openai/gpt-5.6-sol"],
+        allowedCompletionModels: ["openai/gpt-5.6-sol"],
       },
       config: { defaultModel: "gpt-5.6-sol" },
     });
     expect(result.changes).toHaveLength(2);
   });
 
-  it("keeps explicit canonical policy authoritative", () => {
+  it("keeps shipped override policy and migrates legacy completion policy separately", () => {
     const result = normalizeCompatibilityConfig({
       cfg: {
         plugins: {
@@ -67,11 +67,38 @@ describe("llm-task doctor contract", () => {
         allowModelOverride: false,
         allowAuthProfileOverride: false,
         allowedModels: ["anthropic/claude-haiku-4-5"],
+        allowedCompletionModels: ["openai/gpt-5.6-sol"],
       },
       config: {},
     });
     expect(result.changes).toEqual([
-      "Removed plugins.entries.llm-task.config.allowedModels; existing plugins.entries.llm-task.llm.allowedModels remains authoritative.",
+      "Moved plugins.entries.llm-task.config.allowedModels to plugins.entries.llm-task.llm.allowedCompletionModels.",
+    ]);
+  });
+
+  it("keeps an explicit completion policy authoritative over the legacy key", () => {
+    const result = normalizeCompatibilityConfig({
+      cfg: {
+        plugins: {
+          entries: {
+            "llm-task": {
+              llm: {
+                allowModelOverride: true,
+                allowAuthProfileOverride: true,
+                allowedCompletionModels: ["anthropic/claude-haiku-4-5"],
+              },
+              config: { allowedModels: ["openai/gpt-5.6-sol"] },
+            },
+          },
+        },
+      },
+    });
+
+    expect(result.config.plugins?.entries?.["llm-task"]?.llm?.allowedCompletionModels).toEqual([
+      "anthropic/claude-haiku-4-5",
+    ]);
+    expect(result.changes).toEqual([
+      "Removed plugins.entries.llm-task.config.allowedModels; existing plugins.entries.llm-task.llm.allowedCompletionModels remains authoritative.",
     ]);
   });
 
@@ -113,7 +140,7 @@ describe("llm-task doctor contract", () => {
       },
     });
 
-    expect(result.config.plugins?.entries?.["llm-task"]?.llm?.allowedModels).toEqual([
+    expect(result.config.plugins?.entries?.["llm-task"]?.llm?.allowedCompletionModels).toEqual([
       "openai/gpt-5.6",
     ]);
   });
@@ -129,7 +156,7 @@ describe("llm-task doctor contract", () => {
       },
     });
 
-    expect(result.config.plugins?.entries?.["llm-task"]?.llm?.allowedModels).toEqual([]);
+    expect(result.config.plugins?.entries?.["llm-task"]?.llm?.allowedCompletionModels).toEqual([]);
   });
 
   it.each(["openai/gpt-5.6", null, [123, null]])(
@@ -145,7 +172,9 @@ describe("llm-task doctor contract", () => {
         },
       });
 
-      expect(result.config.plugins?.entries?.["llm-task"]?.llm?.allowedModels).toEqual([]);
+      expect(result.config.plugins?.entries?.["llm-task"]?.llm?.allowedCompletionModels).toEqual(
+        [],
+      );
     },
   );
 

@@ -21,7 +21,7 @@ function preserveLiteralLegacyModelRefs(values: string[]): string[] {
 export const legacyConfigRules = [
   {
     path: ["plugins", "entries", "llm-task", "config", "allowedModels"],
-    message: `${ENTRY_PATH}.config.allowedModels moved to ${ENTRY_PATH}.llm.allowedModels. Run "openclaw doctor --fix".`,
+    message: `${ENTRY_PATH}.config.allowedModels moved to ${ENTRY_PATH}.llm.allowedCompletionModels. Run "openclaw doctor --fix".`,
   },
   {
     path: ["plugins", "entries", "llm-task"],
@@ -63,8 +63,8 @@ export function normalizeCompatibilityConfig({ cfg }: { cfg: OpenClawConfig }): 
     ...llm,
     ...(llm.allowModelOverride === undefined ? { allowModelOverride: true } : {}),
     ...(llm.allowAuthProfileOverride === undefined ? { allowAuthProfileOverride: true } : {}),
-    ...(llm.allowedModels === undefined && migratedAllowedModels !== undefined
-      ? { allowedModels: migratedAllowedModels }
+    ...(llm.allowedCompletionModels === undefined && migratedAllowedModels !== undefined
+      ? { allowedCompletionModels: migratedAllowedModels }
       : {}),
   };
   const policyChanged =
@@ -77,10 +77,10 @@ export function normalizeCompatibilityConfig({ cfg }: { cfg: OpenClawConfig }): 
   const changes: string[] = [];
   if (hadLegacyAllowedModels) {
     changes.push(
-      llm.allowedModels !== undefined
-        ? `Removed ${ENTRY_PATH}.config.allowedModels; existing ${ENTRY_PATH}.llm.allowedModels remains authoritative.`
+      llm.allowedCompletionModels !== undefined
+        ? `Removed ${ENTRY_PATH}.config.allowedModels; existing ${ENTRY_PATH}.llm.allowedCompletionModels remains authoritative.`
         : migratedAllowedModels !== undefined
-          ? `Moved ${ENTRY_PATH}.config.allowedModels to ${ENTRY_PATH}.llm.allowedModels.`
+          ? `Moved ${ENTRY_PATH}.config.allowedModels to ${ENTRY_PATH}.llm.allowedCompletionModels.`
           : `Removed empty ${ENTRY_PATH}.config.allowedModels; unrestricted model selection remains unchanged.`,
     );
   }

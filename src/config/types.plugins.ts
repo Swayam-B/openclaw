@@ -29,10 +29,15 @@ export type PluginEntryConfig = {
     /** Explicitly allow this plugin to request a model override for api.runtime.llm.complete. */
     allowModelOverride?: boolean;
     /**
-     * Allowed completion models as canonical provider/model refs, including the resolved default.
+     * Allowed override targets as canonical provider/model refs.
      * Use "*" to explicitly allow any model for this plugin.
      */
     allowedModels?: string[];
+    /**
+     * Allowed models for every completion, including host-resolved defaults and overrides.
+     * Use "*" to explicitly allow any model for this plugin.
+     */
+    allowedCompletionModels?: string[];
     /** Explicitly allow this plugin to select a non-default auth profile for completions. */
     allowAuthProfileOverride?: boolean;
     /** Explicitly allow this plugin to run completions against a non-default agent id. */

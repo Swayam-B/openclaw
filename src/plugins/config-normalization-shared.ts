@@ -33,6 +33,8 @@ export type NormalizedPluginsConfig = {
         allowModelOverride?: boolean;
         allowedModels?: string[];
         hasAllowedModelsConfig?: boolean;
+        allowedCompletionModels?: string[];
+        hasAllowedCompletionModelsConfig?: boolean;
         allowAuthProfileOverride?: boolean;
         allowAgentIdOverride?: boolean;
       };
@@ -174,6 +176,16 @@ function normalizePluginEntries(
                   (llmRaw as { allowedModels?: unknown }).allowedModels,
                 )
               : undefined,
+            hasAllowedCompletionModelsConfig: Array.isArray(
+              (llmRaw as { allowedCompletionModels?: unknown }).allowedCompletionModels,
+            ),
+            allowedCompletionModels: Array.isArray(
+              (llmRaw as { allowedCompletionModels?: unknown }).allowedCompletionModels,
+            )
+              ? normalizeArrayBackedTrimmedStringList(
+                  (llmRaw as { allowedCompletionModels?: unknown }).allowedCompletionModels,
+                )
+              : undefined,
             allowAuthProfileOverride: (llmRaw as { allowAuthProfileOverride?: unknown })
               .allowAuthProfileOverride,
             allowAgentIdOverride: (llmRaw as { allowAgentIdOverride?: unknown })
@@ -185,6 +197,8 @@ function normalizePluginEntries(
       (typeof llm.allowModelOverride === "boolean" ||
         llm.hasAllowedModelsConfig ||
         (Array.isArray(llm.allowedModels) && llm.allowedModels.length > 0) ||
+        llm.hasAllowedCompletionModelsConfig ||
+        (Array.isArray(llm.allowedCompletionModels) && llm.allowedCompletionModels.length > 0) ||
         typeof llm.allowAuthProfileOverride === "boolean" ||
         typeof llm.allowAgentIdOverride === "boolean")
         ? {
@@ -194,6 +208,12 @@ function normalizePluginEntries(
             ...(llm.hasAllowedModelsConfig ? { hasAllowedModelsConfig: true } : {}),
             ...(Array.isArray(llm.allowedModels) && llm.allowedModels.length > 0
               ? { allowedModels: llm.allowedModels }
+              : {}),
+            ...(llm.hasAllowedCompletionModelsConfig
+              ? { hasAllowedCompletionModelsConfig: true }
+              : {}),
+            ...(Array.isArray(llm.allowedCompletionModels) && llm.allowedCompletionModels.length > 0
+              ? { allowedCompletionModels: llm.allowedCompletionModels }
               : {}),
             ...(typeof llm.allowAuthProfileOverride === "boolean"
               ? { allowAuthProfileOverride: llm.allowAuthProfileOverride }

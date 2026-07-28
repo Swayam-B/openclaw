@@ -45,7 +45,7 @@ Designed to be called from workflow engines (for example, Lobster via
         "enabled": true,
         "llm": {
           "allowModelOverride": true,
-          "allowedModels": ["openai/gpt-5.6-sol"],
+          "allowedCompletionModels": ["openai/gpt-5.6-sol"],
           "allowAuthProfileOverride": true
         },
         "config": {
@@ -62,10 +62,10 @@ Designed to be called from workflow engines (for example, Lobster via
 ```
 
 The host-owned `llm` policy authorizes model/profile overrides. Its
-`allowedModels` list restricts every completion, including the resolved agent
+`allowedCompletionModels` restricts every completion, including the resolved agent
 default. Run `openclaw doctor --fix` once for entries created by older releases;
 Doctor grants the shipped selection permissions and moves legacy
-`config.allowedModels` values without widening them.
+`config.allowedModels` values into `llm.allowedCompletionModels` without widening them.
 
 ## Tool API
 
