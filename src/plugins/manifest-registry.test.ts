@@ -517,6 +517,28 @@ describe("loadPluginManifestRegistry", () => {
     expect(manifestChangeCase.secondName).toBe("After");
   });
 
+  it("attributes manifest parse errors to the discovery candidate", () => {
+    const dir = makeTempDir();
+    writeTextFile(dir, "openclaw.plugin.json", "{ invalid");
+
+    const registry = loadPluginManifestRegistry({
+      candidates: [
+        createPluginCandidate({
+          idHint: "broken-scanner",
+          rootDir: dir,
+          origin: "global",
+        }),
+      ],
+    });
+
+    expect(registry.diagnostics).toContainEqual(
+      expect.objectContaining({
+        level: "error",
+        pluginId: "broken-scanner",
+      }),
+    );
+  });
+
   it("synthesizes an empty manifest for explicitly configured standalone files", () => {
     const dir = makeTempDir();
     const source = path.join(dir, "maintenance-access.ts");

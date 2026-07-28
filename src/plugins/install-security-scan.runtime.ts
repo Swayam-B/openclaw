@@ -824,9 +824,8 @@ async function runBeforeInstallHook(params: {
       const activationErrors = activationPlan.diagnostics.filter(
         (diagnostic) =>
           diagnostic.level === "error" &&
-          (diagnostic.pluginId
-            ? hookProviderCandidateIds.has(normalizePluginPolicyId(diagnostic.pluginId))
-            : hookProviderCandidateIds.size > 0),
+          diagnostic.pluginId !== undefined &&
+          hookProviderCandidateIds.has(normalizePluginPolicyId(diagnostic.pluginId)),
       );
       if (activationErrors.length > 0) {
         throw new Error(

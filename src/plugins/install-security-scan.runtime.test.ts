@@ -487,9 +487,14 @@ describe("legacy file install scan compatibility", () => {
     expect(getGlobalHookRunnerMock).not.toHaveBeenCalled();
   });
 
-  it("ignores manifest errors from explicitly enabled plugins that do not provide hooks", async () => {
+  it("ignores unowned manifest errors when another plugin provides hooks", async () => {
     loadPluginRegistrySnapshotMock.mockReturnValue({
       plugins: [
+        {
+          enabled: true,
+          pluginId: "scanner",
+          startup: { activationCapabilities: ["hook"] },
+        },
         {
           enabled: true,
           pluginId: "broken-provider",
@@ -502,11 +507,16 @@ describe("legacy file install scan compatibility", () => {
         {
           level: "error",
           message: "provider manifest could not be parsed",
-          pluginId: "broken-provider",
         },
       ],
-      entries: [],
-      pluginIds: [],
+      entries: [
+        {
+          pluginId: "scanner",
+          origin: "global",
+          reasons: ["activation-capability-hint"],
+        },
+      ],
+      pluginIds: ["scanner"],
       trigger: { kind: "capability", capability: "hook" },
     });
 
@@ -516,6 +526,7 @@ describe("legacy file install scan compatibility", () => {
           plugins: {
             entries: {
               "broken-provider": { enabled: true },
+              scanner: { enabled: true },
             },
           },
         },
@@ -525,7 +536,11 @@ describe("legacy file install scan compatibility", () => {
       }),
     ).resolves.toBeUndefined();
 
-    expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
+    expect(loadIsolatedPluginRegistryMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onlyPluginIds: ["scanner"],
+      }),
+    );
   });
 
   it("preserves canonical mixed-case ids and includes config load-path hook providers", async () => {
