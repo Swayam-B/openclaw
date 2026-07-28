@@ -582,6 +582,58 @@ describe("legacy file install scan compatibility", () => {
     });
   });
 
+  it("fails closed when compatibility checks skip a persisted scanner", async () => {
+    const compatibilityMessage =
+      "plugin requires plugin API >=2026.8.1, but this host is 2026.7.2; skipping load";
+    loadPluginRegistrySnapshotMock.mockReturnValue({
+      diagnostics: [
+        {
+          level: "warn",
+          message: compatibilityMessage,
+          pluginId: "scanner",
+        },
+      ],
+      plugins: [],
+    });
+    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
+      plugins: [
+        {
+          compat: ["activation-capability-hint"],
+          origin: "global",
+          pluginId: "scanner",
+          startup: { activationHooks: ["before_install"] },
+        },
+      ],
+    });
+    resolveManifestActivationPlanMock.mockReturnValue({
+      diagnostics: [],
+      entries: [],
+      pluginIds: [],
+      trigger: { kind: "hook", hook: "before_install" },
+    });
+
+    const result = await scanFileInstallSourceRuntime({
+      config: {
+        plugins: {
+          entries: {
+            scanner: { enabled: true },
+          },
+        },
+      },
+      filePath: "/tmp/payload.js",
+      logger: {},
+      pluginId: "payload",
+    });
+
+    expect(result).toEqual({
+      blocked: {
+        code: "security_scan_failed",
+        reason: `Installation blocked because before_install hook failed: hook provider manifest discovery failed: ${compatibilityMessage}`,
+      },
+    });
+    expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
+  });
+
   it("recovers a malformed scanner by manifest path when its discovery id hint differs", async () => {
     const manifestPath = "/plugins/scanner/openclaw.plugin.json";
     loadPluginRegistrySnapshotMock.mockReturnValue({

@@ -79,15 +79,15 @@ The activation planner exposes both an ids-only API for existing callers and a
 plan API for diagnostics. Plan entries report why a plugin was selected,
 separating explicit `activation.*` hints from manifest-ownership fallback:
 
-| Reason (from `activation.*` hints)   | Reason (from manifest ownership)                                                             |
-| ------------------------------------ | -------------------------------------------------------------------------------------------- |
-| `activation-agent-harness-hint`      | —                                                                                            |
-| `activation-capability-hint`         | —                                                                                            |
-| `activation-channel-hint`            | `manifest-channel-owner` (`channels`)                                                        |
-| `activation-command-hint`            | `manifest-command-alias` (`commandAliases`)                                                  |
-| `activation-provider-hint`           | `manifest-provider-owner` (`providers`), `manifest-setup-provider-owner` (`setup.providers`) |
-| `activation-route-hint`              | —                                                                                            |
-| — (hook trigger has no hint variant) | `manifest-hook-owner` (`hooks`), `manifest-tool-contract` (`contracts.tools`)                |
+| Reason (from `activation.*` hints) | Reason (from manifest ownership)                                                             |
+| ---------------------------------- | -------------------------------------------------------------------------------------------- |
+| `activation-agent-harness-hint`    | —                                                                                            |
+| `activation-capability-hint`       | —                                                                                            |
+| `activation-channel-hint`          | `manifest-channel-owner` (`channels`)                                                        |
+| `activation-command-hint`          | `manifest-command-alias` (`commandAliases`)                                                  |
+| `activation-hook-hint`             | `manifest-hook-owner` (`hooks`), `manifest-tool-contract` (`contracts.tools`)                |
+| `activation-provider-hint`         | `manifest-provider-owner` (`providers`), `manifest-setup-provider-owner` (`setup.providers`) |
+| `activation-route-hint`            | —                                                                                            |
 
 That reason split is the compatibility boundary: existing plugin metadata
 keeps working, while new code can detect broad hints or fallback behavior

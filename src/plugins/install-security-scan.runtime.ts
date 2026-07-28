@@ -920,15 +920,22 @@ async function runBeforeInstallHook(params: {
     const workspaceDir =
       params.workspaceDir ?? resolveAgentWorkspaceDir(config, resolveDefaultAgentId(config));
     const pluginIndex = loadPluginRegistrySnapshot({ config, workspaceDir });
-    const currentErrorDiagnostics = (pluginIndex.diagnostics ?? []).filter(
-      (diagnostic) => diagnostic.level === "error",
+    const isBlockingProviderDiagnostic = (diagnostic: {
+      level: "warn" | "error";
+      message: string;
+    }) =>
+      diagnostic.level === "error" ||
+      (diagnostic.message.includes("plugin requires ") &&
+        diagnostic.message.includes("; skipping load"));
+    const currentBlockingDiagnostics = (pluginIndex.diagnostics ?? []).filter(
+      isBlockingProviderDiagnostic,
     );
     const persistedPluginIndex =
-      currentErrorDiagnostics.length > 0
+      currentBlockingDiagnostics.length > 0
         ? readPersistedInstalledPluginIndexSync({ env: process.env })
         : null;
     const diagnosticMatchesRecord = (
-      diagnostic: (typeof currentErrorDiagnostics)[number],
+      diagnostic: (typeof currentBlockingDiagnostics)[number],
       plugin: {
         pluginId: string;
         manifestPath: string;
@@ -995,7 +1002,9 @@ async function runBeforeInstallHook(params: {
           return false;
         }
         if (
-          !currentErrorDiagnostics.some((diagnostic) => diagnosticMatchesRecord(diagnostic, plugin))
+          !currentBlockingDiagnostics.some((diagnostic) =>
+            diagnosticMatchesRecord(diagnostic, plugin),
+          )
         ) {
           return false;
         }
@@ -1044,8 +1053,8 @@ async function runBeforeInstallHook(params: {
       const activationErrors = [
         ...new Map(
           [
-            ...currentErrorDiagnostics,
-            ...activationPlan.diagnostics.filter((diagnostic) => diagnostic.level === "error"),
+            ...currentBlockingDiagnostics,
+            ...activationPlan.diagnostics.filter(isBlockingProviderDiagnostic),
           ]
             .filter((diagnostic) => {
               const diagnosticPluginId = diagnostic.pluginId

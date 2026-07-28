@@ -204,8 +204,8 @@ export default defineChannelPluginEntry({
 Callbacks run per registration mode (full table under
 [Registration mode](#registration-mode)):
 
-- `setRuntime` runs in every mode except `"cli-metadata"` and
-  `"tool-discovery"`. Store the runtime reference here, typically via
+- `setRuntime` runs in every mode except `"cli-metadata"`, `"install-scan"`,
+  and `"tool-discovery"`. Store the runtime reference here, typically via
   `createPluginRuntimeStore`.
 - `registerCliMetadata` runs for `"cli-metadata"`, `"discovery"`, and
   `"full"`. Use it as the canonical place for channel-owned CLI descriptors
