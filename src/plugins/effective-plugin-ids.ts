@@ -120,17 +120,17 @@ export function resolveExplicitEffectivePluginIds(
   );
   const resolveCanonicalPluginId = (pluginId: string) =>
     canonicalPluginIds.get(normalizePluginPolicyId(pluginId)) ?? pluginId;
+  const allowedPluginIds = new Set(plugins.allow.map(normalizePluginPolicyId));
+  const passesAllowlist = (pluginId: string) =>
+    allowedPluginIds.size === 0 || allowedPluginIds.has(normalizePluginPolicyId(pluginId));
   const ids = new Set(plugins.allow.map(resolveCanonicalPluginId));
   for (const [pluginId, entry] of Object.entries(plugins.entries)) {
-    if (
-      entry?.enabled === true &&
-      (plugins.allow.length === 0 || plugins.allow.includes(pluginId))
-    ) {
+    if (entry?.enabled === true && passesAllowlist(pluginId)) {
       ids.add(resolveCanonicalPluginId(pluginId));
     }
   }
   for (const plugin of options.pluginRecords ?? []) {
-    if (plugin.origin === "config") {
+    if (plugin.origin === "config" && passesAllowlist(plugin.pluginId)) {
       ids.add(plugin.pluginId);
     }
   }

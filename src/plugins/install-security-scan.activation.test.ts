@@ -344,4 +344,48 @@ describe("install hook provider activation", () => {
     expect(enabledResult?.blocked?.reason).toBe("blocked staged target first");
     expect(disabledResult).toBeUndefined();
   });
+
+  it("filters an active scanner that the current restrictive allowlist excludes", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceDir = makeTempDir();
+    const scanner = writeBeforeInstallBlocker("scanner");
+    const enabledConfig = {
+      agents: { defaults: { workspace: workspaceDir } },
+      plugins: {
+        load: { paths: [scanner.file] },
+      },
+    };
+    const restrictedConfig = {
+      agents: { defaults: { workspace: workspaceDir } },
+      plugins: {
+        allow: ["other"],
+        entries: {
+          other: { enabled: true },
+        },
+      },
+    };
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () => {
+        ensurePluginRegistryLoaded({
+          config: enabledConfig,
+          workspaceDir,
+          onlyPluginIds: [scanner.id],
+        });
+        return await scanFileInstallSourceRuntime({
+          config: restrictedConfig,
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        });
+      },
+    );
+
+    expect(result).toBeUndefined();
+  });
 });

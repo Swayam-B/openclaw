@@ -55,7 +55,10 @@ vi.mock("./manifest-owner-policy.js", () => ({
   ) => mocks.passesManifestOwnerBasePolicy(...args),
 }));
 
-import { resolveEffectivePluginIds } from "./effective-plugin-ids.js";
+import {
+  resolveEffectivePluginIds,
+  resolveExplicitEffectivePluginIds,
+} from "./effective-plugin-ids.js";
 
 function resolve(config: OpenClawConfig): string[] {
   return resolveEffectivePluginIds({
@@ -146,4 +149,31 @@ describe("resolveEffectivePluginIds", () => {
       expect(resolve({ plugins })).toStrictEqual([]);
     },
   );
+});
+
+describe("resolveExplicitEffectivePluginIds", () => {
+  it("includes config-path plugins when no restrictive allowlist is set", () => {
+    expect(
+      resolveExplicitEffectivePluginIds(
+        {},
+        {
+          pluginRecords: [{ origin: "config", pluginId: "Local-Scanner" }],
+        },
+      ),
+    ).toEqual(["Local-Scanner"]);
+  });
+
+  it("applies a restrictive allowlist to config-path plugins case-insensitively", () => {
+    const records = [
+      { origin: "config" as const, pluginId: "Local-Scanner" },
+      { origin: "config" as const, pluginId: "Other-Scanner" },
+    ];
+
+    expect(
+      resolveExplicitEffectivePluginIds(
+        { plugins: { allow: ["local-scanner"] } },
+        { pluginRecords: records },
+      ),
+    ).toEqual(["Local-Scanner"]);
+  });
 });

@@ -660,6 +660,63 @@ describe("legacy file install scan compatibility", () => {
     expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
   });
 
+  it("does not recover a config-path scanner excluded by a restrictive allowlist", async () => {
+    const manifestPath = "/plugins/scanner/openclaw.plugin.json";
+    loadPluginRegistrySnapshotMock.mockReturnValue({
+      diagnostics: [
+        {
+          level: "error",
+          message: "scanner manifest could not be parsed",
+          pluginId: "scanner",
+          source: manifestPath,
+        },
+      ],
+      plugins: [],
+    });
+    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
+      plugins: [
+        {
+          compat: ["activation-capability-hint"],
+          manifestPath,
+          origin: "config",
+          pluginId: "scanner",
+          startup: { activationCapabilities: ["hook"] },
+        },
+      ],
+    });
+    resolveManifestActivationPlanMock.mockReturnValue({
+      diagnostics: [
+        {
+          level: "error",
+          message: "scanner manifest could not be parsed",
+          pluginId: "scanner",
+        },
+      ],
+      entries: [],
+      pluginIds: [],
+      trigger: { kind: "capability", capability: "hook" },
+    });
+    getGlobalHookRunnerMock.mockReturnValue(null);
+
+    await expect(
+      scanFileInstallSourceRuntime({
+        config: {
+          plugins: {
+            allow: ["other"],
+            entries: {
+              other: { enabled: true },
+            },
+          },
+        },
+        filePath: "/tmp/payload.js",
+        logger: {},
+        pluginId: "payload",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
+  });
+
   it("ignores unowned manifest errors when another plugin provides hooks", async () => {
     loadPluginRegistrySnapshotMock.mockReturnValue({
       plugins: [
@@ -719,7 +776,7 @@ describe("legacy file install scan compatibility", () => {
   it("preserves canonical mixed-case ids and includes config load-path hook providers", async () => {
     const config = {
       plugins: {
-        allow: ["scanner-x"],
+        allow: ["local-scanner", "scanner-x"],
         load: { paths: ["/tmp/local-scanner"] },
       },
     };

@@ -43,6 +43,7 @@ type InstallScanLogger = {
 };
 
 function resolveBeforeInstallHookRunner(params: {
+  allowedPluginIds: ReadonlySet<string> | null;
   config: OpenClawConfig;
   disableAllPlugins: boolean;
   disabledPluginIds: ReadonlySet<string>;
@@ -53,6 +54,7 @@ function resolveBeforeInstallHookRunner(params: {
   if (
     params.hookProviderIds.length === 0 &&
     params.disabledPluginIds.size === 0 &&
+    params.allowedPluginIds === null &&
     !params.disableAllPlugins
   ) {
     return getGlobalHookRunner();
@@ -76,6 +78,7 @@ function resolveBeforeInstallHookRunner(params: {
     const normalizedId = normalizePluginPolicyId(pluginId);
     return (
       !params.disableAllPlugins &&
+      (params.allowedPluginIds === null || params.allowedPluginIds.has(normalizedId)) &&
       !isolatedPluginIds.has(normalizedId) &&
       !params.disabledPluginIds.has(normalizedId)
     );
@@ -929,6 +932,10 @@ async function runBeforeInstallHook(params: {
         .map((plugin) => normalizePluginPolicyId(plugin.pluginId)),
     ]);
     const hookRunner = resolveBeforeInstallHookRunner({
+      allowedPluginIds:
+        normalizedPlugins.allow.length > 0
+          ? new Set(normalizedPlugins.allow.map(normalizePluginPolicyId))
+          : null,
       config,
       disableAllPlugins: !normalizedPlugins.enabled,
       disabledPluginIds,
