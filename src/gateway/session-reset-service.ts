@@ -492,6 +492,7 @@ async function runAcpCleanupStep(params: {
 
 async function closeAcpRuntimeForSession(params: {
   cfg: OpenClawConfig;
+  agentId?: string;
   sessionKey: string;
   fallbackSessionKeys?: Array<string | undefined>;
   reason: "session-reset" | "session-delete";
@@ -515,7 +516,10 @@ async function closeAcpRuntimeForSession(params: {
   let acpMeta: SessionAcpMeta | undefined;
   let acpSessionKey = params.sessionKey;
   for (const sessionKey of sessionKeys) {
-    acpMeta = readAcpSessionMeta({ sessionKey });
+    acpMeta = readAcpSessionMeta({
+      sessionKey,
+      ...(params.agentId ? { agentId: params.agentId } : {}),
+    });
     if (acpMeta) {
       acpSessionKey = sessionKey;
       break;
@@ -805,6 +809,7 @@ export async function cleanupSessionBeforeMutation(params: {
   const parentSessionKey = params.target.canonicalKey ?? params.canonicalKey ?? params.key;
   const parentAcpError = await closeAcpRuntimeForSession({
     cfg: params.cfg,
+    agentId: params.target.agentId,
     sessionKey: parentSessionKey,
     fallbackSessionKeys: [params.canonicalKey, params.legacyKey, params.key],
     reason: params.reason,
@@ -1194,6 +1199,7 @@ export async function performGatewaySessionReset(params: {
       const parentSessionKey = target.canonicalKey ?? canonicalKey ?? params.key;
       const parentAcpError = await closeAcpRuntimeForSession({
         cfg,
+        agentId: target.agentId,
         sessionKey: parentSessionKey,
         fallbackSessionKeys: [canonicalKey, legacyKey, params.key],
         reason: "session-reset",
