@@ -19,6 +19,11 @@ const loadPluginRegistrySnapshotMock = vi.fn();
 const loadIsolatedPluginRegistryMock = vi.fn();
 const loadInstalledPluginIndexInstallRecordsSyncMock = vi.fn();
 const readPersistedInstalledPluginIndexSyncMock = vi.fn();
+const getRuntimeConfigMock = vi.fn();
+
+vi.mock("../config/config.js", () => ({
+  getRuntimeConfig: () => getRuntimeConfigMock(),
+}));
 
 vi.mock("../security/install-policy.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../security/install-policy.js")>();
@@ -105,6 +110,8 @@ function expectBuiltinInstallFrictionBypassed() {
 }
 
 beforeEach(() => {
+  getRuntimeConfigMock.mockReset();
+  getRuntimeConfigMock.mockReturnValue({});
   runInstallPolicyMock.mockReset();
   findBlockedManifestDependenciesMock.mockReset();
   findBlockedNodeModulesDirectoryMock.mockReset();
@@ -315,6 +322,66 @@ describe("install security scan official bypass", () => {
 });
 
 describe("legacy file install scan compatibility", () => {
+  it("resolves configured hook providers when the caller omits config", async () => {
+    const config = {
+      plugins: {
+        allow: ["scanner"],
+        entries: {
+          scanner: { enabled: true },
+        },
+      },
+    };
+    getRuntimeConfigMock.mockReturnValue(config);
+    loadPluginRegistrySnapshotMock.mockReturnValue({
+      diagnostics: [],
+      plugins: [
+        {
+          enabled: true,
+          origin: "global",
+          pluginId: "scanner",
+          startup: { activationHooks: ["before_install"] },
+        },
+      ],
+    });
+    resolveManifestActivationPlanMock.mockReturnValue({
+      diagnostics: [],
+      entries: [
+        {
+          pluginId: "scanner",
+          origin: "global",
+          reasons: ["activation-hook-hint"],
+        },
+      ],
+      pluginIds: ["scanner"],
+      trigger: { kind: "hook", hook: "before_install" },
+    });
+    const hasHooks = vi.fn().mockReturnValue(true);
+    const runBeforeInstall = vi.fn().mockResolvedValue({
+      block: true,
+      blockReason: "resolved runtime scanner",
+    });
+    getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
+
+    const result = await scanFileInstallSourceRuntime({
+      filePath: "/tmp/payload.js",
+      logger: {},
+      pluginId: "payload",
+    });
+
+    expect(result?.blocked?.reason).toBe("resolved runtime scanner");
+    expect(loadPluginRegistrySnapshotMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config,
+      }),
+    );
+    expect(resolveManifestActivationPlanMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config,
+        onlyPluginIds: ["scanner"],
+      }),
+    );
+  });
+
   it("loads every trusted hook-capability plugin before dispatch", async () => {
     const config = {
       plugins: {

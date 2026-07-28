@@ -2,6 +2,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope-config.js";
+import { getRuntimeConfig } from "../config/config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { resolveUserPath } from "../infra/home-dir.js";
@@ -921,7 +922,7 @@ async function runBeforeInstallHook(params: {
   };
 }): Promise<InstallSecurityScanResult | undefined> {
   try {
-    const config = params.config ?? {};
+    const config = params.config ?? getRuntimeConfig();
     const normalizedPlugins = normalizePluginsConfig(config.plugins);
     const workspaceDir =
       params.workspaceDir ?? resolveAgentWorkspaceDir(config, resolveDefaultAgentId(config));
