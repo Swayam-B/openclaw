@@ -96,6 +96,32 @@ function writeStatefulBeforeInstallBlocker(id: string) {
   return plugin;
 }
 
+function writeConfigurableBeforeInstallBlocker(id: string) {
+  const plugin = writePlugin({
+    id,
+    filename: `${id}.cjs`,
+    body: `module.exports = { id: ${JSON.stringify(id)}, register(api) {
+      const shouldBlock = api.pluginConfig?.block === true;
+      api.on("before_install", () => shouldBlock ? ({
+        block: true,
+        blockReason: "current scanner config blocks",
+      }) : undefined);
+    } };`,
+  });
+  const manifestPath = path.join(plugin.dir, "openclaw.plugin.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+  manifest.activation = { onHooks: ["before_install"] };
+  manifest.configSchema = {
+    type: "object",
+    properties: {
+      block: { type: "boolean" },
+    },
+    additionalProperties: false,
+  };
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
+  return plugin;
+}
+
 function writeLabeledBeforeInstallBlocker(
   id: string,
   dir: string,
@@ -680,6 +706,44 @@ describe("install hook provider activation", () => {
 
     expect(result?.blocked?.reason).toBe("scanner instance 1");
     expect(Reflect.get(globalThis, "__openclawInstallScannerInstances")).toBe(1);
+  });
+
+  it("reloads a live scanner when its plugin config changes", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceDir = makeTempDir();
+    const scanner = writeConfigurableBeforeInstallBlocker("reconfigured-scanner");
+    const configFor = (block: boolean) => ({
+      agents: { defaults: { workspace: workspaceDir } },
+      plugins: {
+        load: { paths: [scanner.file] },
+        entries: {
+          [scanner.id]: { config: { block } },
+        },
+      },
+    });
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () => {
+        ensurePluginRegistryLoaded({
+          config: configFor(false),
+          workspaceDir,
+          onlyPluginIds: [scanner.id],
+        });
+        return await scanFileInstallSourceRuntime({
+          config: configFor(true),
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        });
+      },
+    );
+
+    expect(result?.blocked?.reason).toBe("current scanner config blocks");
   });
 
   it("does not reuse an active hook without a current activation declaration", async () => {

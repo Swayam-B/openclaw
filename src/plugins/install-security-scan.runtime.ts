@@ -38,7 +38,9 @@ import { loadInstalledPluginIndexInstallRecordsSync } from "./installed-plugin-i
 import { readPersistedInstalledPluginIndexSync } from "./installed-plugin-index-store.js";
 import type { InstalledPluginIndex } from "./installed-plugin-index.js";
 import { normalizePluginPolicyId } from "./plugin-policy-id.js";
+import { pluginRegistryConfigMatches } from "./plugin-registry-config-provenance.js";
 import { loadPluginRegistrySnapshot } from "./plugin-registry-snapshot.js";
+import type { PluginRegistry } from "./registry-types.js";
 import { collectLivePluginRegistries, getPluginRegistryWorkspaceDir } from "./runtime.js";
 import { loadIsolatedPluginRegistry } from "./runtime/runtime-registry-loader.js";
 
@@ -72,17 +74,29 @@ function resolveBeforeInstallHookRunner(params: {
       .filter((plugin) => currentHookProviderIds.has(normalizePluginPolicyId(plugin.pluginId)))
       .map((plugin) => [normalizePluginPolicyId(plugin.pluginId), plugin]),
   );
-  const livePluginMatchesCurrentProvider = (plugin: {
-    id: string;
-    rootDir?: string;
-    source: string;
-    status: "loaded" | "disabled" | "error";
-  }) => {
+  const livePluginMatchesCurrentProvider = (
+    registry: PluginRegistry,
+    plugin: {
+      id: string;
+      rootDir?: string;
+      source: string;
+      status: "loaded" | "disabled" | "error";
+    },
+  ) => {
     if (plugin.status !== "loaded") {
       return false;
     }
     const currentProvider = currentProviderById.get(normalizePluginPolicyId(plugin.id));
     if (!currentProvider) {
+      return false;
+    }
+    if (
+      !pluginRegistryConfigMatches({
+        registry,
+        config: params.config,
+        pluginId: plugin.id,
+      })
+    ) {
       return false;
     }
     if (currentProvider.source) {
@@ -104,7 +118,7 @@ function resolveBeforeInstallHookRunner(params: {
     .map((registry): GlobalHookRunnerRegistry => {
       const reusablePluginIds = new Set(
         registry.plugins
-          .filter(livePluginMatchesCurrentProvider)
+          .filter((plugin) => livePluginMatchesCurrentProvider(registry, plugin))
           .map((plugin) => normalizePluginPolicyId(plugin.id)),
       );
       return {
