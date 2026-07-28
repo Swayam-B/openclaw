@@ -813,6 +813,46 @@ describe("legacy file install scan compatibility", () => {
     expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
   });
 
+  it("revokes persisted config-path scanner trust after its load path is removed", async () => {
+    const rootDir = "/plugins/stale-scanner";
+    loadPluginRegistrySnapshotMock.mockReturnValue({
+      diagnostics: [
+        {
+          level: "error",
+          message: "scanner manifest could not be parsed",
+          pluginId: "scanner",
+          source: `${rootDir}/openclaw.plugin.json`,
+        },
+      ],
+      plugins: [],
+    });
+    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
+      plugins: [
+        {
+          compat: ["activation-capability-hint"],
+          enabled: true,
+          manifestPath: `${rootDir}/openclaw.plugin.json`,
+          origin: "config",
+          pluginId: "scanner",
+          rootDir,
+          startup: { activationHooks: ["before_install"] },
+        },
+      ],
+    });
+
+    await expect(
+      scanFileInstallSourceRuntime({
+        config: {},
+        filePath: "/tmp/payload.js",
+        logger: {},
+        pluginId: "payload",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(resolveManifestActivationPlanMock).not.toHaveBeenCalled();
+    expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
+  });
+
   it("ignores a broken persisted scanner source shadowed by a valid override", async () => {
     const persistedRoot = "/plugins/installed-scanner";
     const overrideRoot = "/plugins/config-scanner";

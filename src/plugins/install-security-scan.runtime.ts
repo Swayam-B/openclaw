@@ -4,6 +4,7 @@ import path from "node:path";
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope-config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { formatErrorMessage } from "../infra/errors.js";
+import { resolveUserPath } from "../infra/home-dir.js";
 import { tryReadJson } from "../infra/json-files.js";
 import { resolveOpenClawPackageRootSync } from "../infra/openclaw-root.js";
 import { parseStrictPositiveInteger } from "../infra/parse-finite-number.js";
@@ -921,6 +922,7 @@ async function runBeforeInstallHook(params: {
 }): Promise<InstallSecurityScanResult | undefined> {
   try {
     const config = params.config ?? {};
+    const normalizedPlugins = normalizePluginsConfig(config.plugins);
     const workspaceDir =
       params.workspaceDir ?? resolveAgentWorkspaceDir(config, resolveDefaultAgentId(config));
     const pluginIndex = loadPluginRegistrySnapshot({
@@ -1027,11 +1029,46 @@ async function runBeforeInstallHook(params: {
         plugin,
       ]),
     );
+    const currentPluginRecords = new Set(pluginIndex.plugins);
     for (const plugin of pluginIndex.plugins) {
       pluginRecords.set(normalizePluginPolicyId(plugin.pluginId), plugin);
     }
+    const currentLoadPathSelections = await Promise.all(
+      normalizedPlugins.loadPaths.map(async (loadPath) => {
+        const resolvedPath = path.resolve(resolveUserPath(loadPath, process.env));
+        try {
+          const stat = await fs.stat(resolvedPath);
+          return { isDirectory: stat.isDirectory(), path: resolvedPath };
+        } catch {
+          return { isDirectory: false, path: resolvedPath };
+        }
+      }),
+    );
+    const isSelectedByCurrentLoadPath = (plugin: {
+      manifestPath?: string;
+      rootDir?: string;
+      source?: string;
+      setupSource?: string;
+    }) => {
+      const recordPaths = [plugin.manifestPath, plugin.rootDir, plugin.source, plugin.setupSource]
+        .filter((value): value is string => value !== undefined)
+        .map((value) => path.resolve(value));
+      return currentLoadPathSelections.some((selection) =>
+        recordPaths.some(
+          (recordPath) =>
+            selection.path === recordPath ||
+            (selection.isDirectory && isSamePathOrInside(selection.path, recordPath)),
+        ),
+      );
+    };
     const explicitlyEnabledPluginIds = resolveExplicitEffectivePluginIds(config, {
-      pluginRecords: [...pluginRecords.values()],
+      pluginRecords: [...pluginRecords.values()].map((plugin) =>
+        plugin.origin === "config" &&
+        !currentPluginRecords.has(plugin) &&
+        !isSelectedByCurrentLoadPath(plugin)
+          ? { origin: "global", pluginId: plugin.pluginId }
+          : plugin,
+      ),
     });
     const explicitlyEnabledPluginIdSet = new Set(
       explicitlyEnabledPluginIds.map(normalizePluginPolicyId),
@@ -1116,7 +1153,6 @@ async function runBeforeInstallHook(params: {
         .map(([, pluginId]) => pluginId)
         .toSorted((left, right) => left.localeCompare(right));
     }
-    const normalizedPlugins = normalizePluginsConfig(config.plugins);
     const disabledPluginIds = new Set([
       ...normalizedPlugins.deny.map(normalizePluginPolicyId),
       ...Object.entries(normalizedPlugins.entries).flatMap(([pluginId, entry]) =>
