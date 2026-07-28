@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 let ensurePluginRegistryLoaded: typeof import("./runtime-registry-loader.js").ensurePluginRegistryLoaded;
+let loadIsolatedPluginRegistry: typeof import("./runtime-registry-loader.js").loadIsolatedPluginRegistry;
 let resetPluginRegistryLoadedForTests: typeof import("./runtime-registry-loader.js").testing.resetPluginRegistryLoadedForTests;
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
@@ -124,6 +125,7 @@ describe("ensurePluginRegistryLoaded", () => {
   beforeAll(async () => {
     const mod = await import("./runtime-registry-loader.js");
     ensurePluginRegistryLoaded = mod.ensurePluginRegistryLoaded;
+    loadIsolatedPluginRegistry = mod.loadIsolatedPluginRegistry;
     resetPluginRegistryLoadedForTests = () => mod.testing.resetPluginRegistryLoadedForTests();
   });
 
@@ -263,29 +265,18 @@ describe("ensurePluginRegistryLoaded", () => {
     expect(loadOptions(1).onlyPluginIds).toEqual(["demo-b"]);
   });
 
-  it("forces an exact scoped reload without reusing the active registry or cache", () => {
-    const activeRegistry = createEmptyPluginRegistry();
-    activeRegistry.plugins.push({
-      id: "demo",
-      source: "/tmp/demo.js",
-      origin: "workspace",
-      enabled: true,
-      status: "loaded",
-    } as never);
-    mocks.getActivePluginRegistry.mockReturnValue(activeRegistry);
-    mocks.getActivePluginRegistryWorkspaceDir.mockReturnValue("/resolved-workspace");
-
-    ensurePluginRegistryLoaded({
+  it("loads an isolated full runtime without activating or caching it", () => {
+    loadIsolatedPluginRegistry({
       config: {} as never,
-      forceReload: true,
       onlyPluginIds: ["demo"],
     });
 
     expect(mocks.loadOpenClawPlugins).toHaveBeenCalledOnce();
+    expect(loadOptions().activate).toBe(false);
     expect(loadOptions().cache).toBe(false);
+    expect(loadOptions().forceFullRuntimeForChannelPlugins).toBe(true);
     expect(loadOptions().onlyPluginIds).toEqual(["demo"]);
-    expect(mocks.resolveCompatibleRuntimePluginRegistry).not.toHaveBeenCalled();
-    expect(mocks.resolveRuntimePluginRegistry).not.toHaveBeenCalled();
+    expect(loadOptions().throwOnLoadError).toBe(true);
   });
 
   it("maps explicit channel scopes to owner plugin ids before loading", () => {

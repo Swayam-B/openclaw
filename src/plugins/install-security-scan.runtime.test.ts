@@ -7,11 +7,11 @@ const findBlockedNodeModulesFileAliasMock = vi.fn();
 const findBlockedPackageDirectoryInPathMock = vi.fn();
 const findBlockedPackageFileAliasInPathMock = vi.fn();
 const getGlobalHookRunnerMock = vi.fn();
+const getGlobalHookRunnerRegistryMock = vi.fn();
+const createHookRunnerMock = vi.fn();
 const resolveManifestActivationPlanMock = vi.fn();
 const loadPluginRegistrySnapshotMock = vi.fn();
-const ensurePluginRegistryLoadedMock = vi.fn();
-const getActivePluginRegistryMock = vi.fn();
-const getActivePluginRegistryWorkspaceDirMock = vi.fn();
+const loadIsolatedPluginRegistryMock = vi.fn();
 
 vi.mock("../security/install-policy.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../security/install-policy.js")>();
@@ -42,6 +42,14 @@ vi.mock("./hook-runner-global.js", () => ({
   getGlobalHookRunner: () => getGlobalHookRunnerMock(),
 }));
 
+vi.mock("./hook-runner-global-state.js", () => ({
+  getGlobalHookRunnerRegistry: () => getGlobalHookRunnerRegistryMock(),
+}));
+
+vi.mock("./hooks.js", () => ({
+  createHookRunner: (...args: unknown[]) => createHookRunnerMock(...args),
+}));
+
 vi.mock("./activation-planner.js", () => ({
   resolveManifestActivationPlan: (...args: unknown[]) => resolveManifestActivationPlanMock(...args),
 }));
@@ -51,12 +59,7 @@ vi.mock("./plugin-registry-snapshot.js", () => ({
 }));
 
 vi.mock("./runtime/runtime-registry-loader.js", () => ({
-  ensurePluginRegistryLoaded: (...args: unknown[]) => ensurePluginRegistryLoadedMock(...args),
-}));
-
-vi.mock("./runtime.js", () => ({
-  getActivePluginRegistry: () => getActivePluginRegistryMock(),
-  getActivePluginRegistryWorkspaceDir: () => getActivePluginRegistryWorkspaceDirMock(),
+  loadIsolatedPluginRegistry: (...args: unknown[]) => loadIsolatedPluginRegistryMock(...args),
 }));
 
 const {
@@ -84,6 +87,10 @@ beforeEach(() => {
   findBlockedPackageDirectoryInPathMock.mockReset();
   findBlockedPackageFileAliasInPathMock.mockReset();
   getGlobalHookRunnerMock.mockReset();
+  getGlobalHookRunnerRegistryMock.mockReset();
+  getGlobalHookRunnerRegistryMock.mockReturnValue(null);
+  createHookRunnerMock.mockReset();
+  createHookRunnerMock.mockImplementation(() => getGlobalHookRunnerMock());
   resolveManifestActivationPlanMock.mockReset();
   resolveManifestActivationPlanMock.mockReturnValue({
     diagnostics: [],
@@ -93,11 +100,12 @@ beforeEach(() => {
   });
   loadPluginRegistrySnapshotMock.mockReset();
   loadPluginRegistrySnapshotMock.mockReturnValue({ plugins: [] });
-  ensurePluginRegistryLoadedMock.mockReset();
-  getActivePluginRegistryMock.mockReset();
-  getActivePluginRegistryMock.mockReturnValue(null);
-  getActivePluginRegistryWorkspaceDirMock.mockReset();
-  getActivePluginRegistryWorkspaceDirMock.mockReturnValue(undefined);
+  loadIsolatedPluginRegistryMock.mockReset();
+  loadIsolatedPluginRegistryMock.mockReturnValue({
+    hooks: [],
+    plugins: [],
+    typedHooks: [],
+  });
 });
 
 describe("install security scan official bypass", () => {
@@ -307,7 +315,7 @@ describe("legacy file install scan compatibility", () => {
         capability: "hook",
       },
     });
-    expect(ensurePluginRegistryLoadedMock).toHaveBeenCalledWith({
+    expect(loadIsolatedPluginRegistryMock).toHaveBeenCalledWith({
       config,
       workspaceDir: expect.any(String),
       onlyPluginIds: ["scanner-a", "scanner-b"],
@@ -315,7 +323,7 @@ describe("legacy file install scan compatibility", () => {
     expect(runBeforeInstall).toHaveBeenCalledOnce();
   });
 
-  it("preserves active plugins when activating a lazy hook provider", async () => {
+  it("loads a lazy hook provider without replacing the active registry", async () => {
     const config = {
       plugins: {
         load: { paths: ["/tmp/command-plugin", "/tmp/scanner"] },
@@ -339,9 +347,6 @@ describe("legacy file install scan compatibility", () => {
       pluginIds: ["scanner"],
       trigger: { kind: "capability", capability: "hook" },
     });
-    getActivePluginRegistryMock.mockReturnValue({
-      plugins: [{ id: "command-plugin", status: "loaded" }],
-    });
     const hasHooks = vi.fn().mockReturnValue(true);
     const runBeforeInstall = vi.fn().mockResolvedValue(undefined);
     getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
@@ -353,11 +358,10 @@ describe("legacy file install scan compatibility", () => {
       pluginId: "payload",
     });
 
-    expect(ensurePluginRegistryLoadedMock).toHaveBeenCalledWith({
+    expect(loadIsolatedPluginRegistryMock).toHaveBeenCalledWith({
       config,
-      forceReload: true,
       workspaceDir: expect.any(String),
-      onlyPluginIds: ["command-plugin", "scanner"],
+      onlyPluginIds: ["scanner"],
     });
   });
 
@@ -393,7 +397,7 @@ describe("legacy file install scan compatibility", () => {
       }),
     ).resolves.toBeUndefined();
 
-    expect(ensurePluginRegistryLoadedMock).not.toHaveBeenCalled();
+    expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
   });
 
   it("fails closed when a declared hook provider cannot load", async () => {
@@ -409,7 +413,7 @@ describe("legacy file install scan compatibility", () => {
       pluginIds: ["scanner"],
       trigger: { kind: "capability", capability: "hook" },
     });
-    ensurePluginRegistryLoadedMock.mockImplementation(() => {
+    loadIsolatedPluginRegistryMock.mockImplementation(() => {
       throw new Error("scanner runtime unavailable");
     });
 
@@ -470,7 +474,7 @@ describe("legacy file install scan compatibility", () => {
           "Installation blocked because before_install hook failed: hook provider manifest discovery failed: scanner manifest could not be parsed",
       },
     });
-    expect(ensurePluginRegistryLoadedMock).not.toHaveBeenCalled();
+    expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
     expect(getGlobalHookRunnerMock).not.toHaveBeenCalled();
   });
 
@@ -520,7 +524,7 @@ describe("legacy file install scan compatibility", () => {
         onlyPluginIds: ["Local-Scanner", "Scanner-X"],
       }),
     );
-    expect(ensurePluginRegistryLoadedMock).toHaveBeenCalledWith({
+    expect(loadIsolatedPluginRegistryMock).toHaveBeenCalledWith({
       config,
       workspaceDir: expect.any(String),
       onlyPluginIds: ["Local-Scanner", "Scanner-X"],

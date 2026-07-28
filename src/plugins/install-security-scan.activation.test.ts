@@ -16,6 +16,8 @@ import {
   useNoBundledPlugins,
   writePlugin,
 } from "./loader.test-fixtures.js";
+import { createEmptyPluginRegistry } from "./registry-empty.js";
+import { setActivePluginRegistry } from "./runtime.js";
 import { ensurePluginRegistryLoaded } from "./runtime/runtime-registry-loader.js";
 
 function writeBeforeInstallBlocker(id: string, dir?: string) {
@@ -37,10 +39,11 @@ function writeBeforeInstallBlocker(id: string, dir?: string) {
   return plugin;
 }
 
-function writeCommandPlugin(id: string) {
+function writeCommandPlugin(id: string, dir?: string) {
   return writePlugin({
     id,
-    filename: `${id}.cjs`,
+    ...(dir ? { dir } : {}),
+    filename: dir ? "index.cjs" : `${id}.cjs`,
     body: `module.exports = { id: ${JSON.stringify(id)}, register(api) {
       api.registerCommand({
         name: "hello",
@@ -197,6 +200,96 @@ describe("install hook provider activation", () => {
         reason: "blocked staged target payload",
       },
     });
+  });
+
+  it("fully loads a hook provider that is active only through a hookless setup runtime", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceDir = makeTempDir();
+    const scanner = writeBeforeInstallBlocker("setup-loaded-scanner");
+    const config = {
+      agents: { defaults: { workspace: workspaceDir } },
+      plugins: {
+        load: { paths: [scanner.file] },
+      },
+    };
+    const setupRegistry = createEmptyPluginRegistry();
+    setupRegistry.plugins.push({
+      id: scanner.id,
+      source: scanner.file,
+      origin: "config",
+      enabled: true,
+      status: "loaded",
+    } as never);
+    setActivePluginRegistry(setupRegistry, "setup-runtime", "default", workspaceDir);
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () =>
+        await scanFileInstallSourceRuntime({
+          config,
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        }),
+    );
+
+    expect(result?.blocked?.reason).toBe("blocked staged target payload");
+  });
+
+  it("does not replace the active registry when scanning another workspace", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceA = makeTempDir();
+    const workspaceB = makeTempDir();
+    const commandPlugin = writeCommandPlugin(
+      "workspace-a-command",
+      path.join(workspaceA, ".openclaw", "extensions", "workspace-a-command"),
+    );
+    const scanner = writeBeforeInstallBlocker(
+      "workspace-b-scanner",
+      path.join(workspaceB, ".openclaw", "extensions", "workspace-b-scanner"),
+    );
+    const config = {
+      plugins: {
+        allow: [commandPlugin.id, scanner.id],
+        entries: {
+          [commandPlugin.id]: { enabled: true },
+          [scanner.id]: { enabled: true },
+        },
+      },
+    };
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () => {
+        ensurePluginRegistryLoaded({
+          config,
+          workspaceDir: workspaceA,
+          onlyPluginIds: [commandPlugin.id],
+        });
+        expect(listPluginCommands().map((command) => command.name)).toContain("hello");
+        const scanResult = await evaluateSkillInstallPolicyRuntime({
+          config,
+          workspaceDir: workspaceB,
+          installId: "node",
+          logger: {},
+          origin: { type: "workspace" },
+          skillName: "payload",
+          sourceDir: makeTempDir(),
+        });
+        expect(listPluginCommands().map((command) => command.name)).toContain("hello");
+        return scanResult;
+      },
+    );
+
+    expect(result?.blocked?.reason).toBe("blocked staged target payload");
   });
 
   it("stops dispatching a hook provider after it is disabled", async () => {
