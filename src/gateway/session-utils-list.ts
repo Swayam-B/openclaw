@@ -7,28 +7,24 @@ import type { SessionsListParams } from "../../packages/gateway-protocol/src/ind
 import { readAcpSessionMetaBatch } from "../acp/runtime/session-meta.js";
 import { resolveDefaultAgentId } from "../agents/agent-scope.js";
 import type { ModelCatalogEntry } from "../agents/model-catalog.js";
-import {
-  countActiveDescendantRuns,
-  getSessionDisplaySubagentRunByChildSessionKey,
-} from "../agents/subagent-registry-read.js";
+import { buildSubagentRunReadIndex } from "../agents/subagent-registry-read.js";
 import { shouldKeepSubagentRunChildLink } from "../agents/subagent-run-liveness.js";
 import type { SessionEntry } from "../config/sessions.js";
+import type { SessionEntryListQuery } from "../config/sessions/session-accessor.types.js";
+import {
+  foldedSessionKeyAliasCandidates,
+  normalizeStoreSessionKey,
+} from "../config/sessions/store-entry.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { withPinnedActivePluginRegistryWorkspaceDir } from "../plugins/runtime-workspace-state.js";
 import { normalizeAgentId, parseAgentSessionKey } from "../routing/session-key.js";
-import { isCronRunSessionKey } from "../sessions/session-key-utils.js";
-import { type SessionEntryPair, sortAndLimitSessionEntries } from "./session-list-order.js";
 import { resolveStoredSessionKeyForAgentStore } from "./session-store-key.js";
-import { readSessionTitleFieldsFromTranscriptAsync as readScopedSessionTitleFieldsFromTranscriptAsync } from "./session-transcript-title-reader.js";
+import { readSessionTitleFieldsFromTranscriptAsync as readScopedSessionTitleFieldsFromTranscriptAsync } from "./session-transcript-readers.js";
 import type {
   SessionListRowContext,
   SessionListRowContextProvider,
 } from "./session-utils-contracts.js";
-import {
-  deriveSessionTitle,
-  isFinitePositiveTimestamp,
-  shouldKeepStoreOnlyChildLink,
-} from "./session-utils-core.js";
+import { shouldKeepStoreOnlyChildLink } from "./session-utils-core.js";
 import { getSessionDefaults } from "./session-utils-model.js";
 import {
   buildSessionListRowContext,
@@ -55,9 +51,24 @@ const SESSIONS_LIST_YIELD_BATCH_SIZE = 10;
 
 const SESSIONS_LIST_DEFAULT_LIMIT = 100;
 
+type SessionEntryPair = [string, SessionEntry];
+
+function compareSessionEntries(
+  left: SessionEntryPair,
+  right: SessionEntryPair,
+  sortBy: SessionsListParams["sortBy"],
+): number {
+  const pinned =
+    sortBy === "lastInteractionAt" ? 0 : (right[1].pinnedAt ?? 0) - (left[1].pinnedAt ?? 0);
+  const timestamp =
+    (sortBy === "lastInteractionAt" ? (right[1].lastInteractionAt ?? 0) : right[1].updatedAt) -
+    (sortBy === "lastInteractionAt" ? (left[1].lastInteractionAt ?? 0) : left[1].updatedAt);
+  return pinned || timestamp || (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0);
+}
+
 type SessionEntrySelection = {
   entries: SessionEntryPair[];
-  creators: Array<{ id: string; label?: string }>;
+  creatorEntries: SessionEntryPair[];
   totalCount: number;
   limitApplied?: number;
   offset: number;
@@ -65,30 +76,136 @@ type SessionEntrySelection = {
   hasMore: boolean;
 };
 
-function addSessionCreatorIdentity(
-  creators: Map<string, { id: string; label?: string }>,
-  entry: SessionEntry,
-  userProfileLabelById: Map<string, string | undefined>,
-): void {
-  const actor = projectSessionActor(entry.createdActor, userProfileLabelById);
-  const id = normalizeOptionalString(actor?.id);
-  if (!id) {
-    return;
-  }
-  const label = normalizeOptionalString(actor?.label);
-  const existing = creators.get(id);
-  if (!existing || (label && (!existing.label || label.localeCompare(existing.label) < 0))) {
-    creators.set(id, { id, ...(label ? { label } : {}) });
-  }
+type SqlSessionEntrySelection = {
+  creatorActors?: readonly NonNullable<SessionEntry["createdActor"]>[];
+  creatorFilterApplied?: boolean;
+  lineage?: SessionListLineageSqlQuery;
+  ordered?: boolean;
+  totalCount?: number;
+};
+
+type SessionListBuildParams = {
+  cfg: OpenClawConfig;
+  storePath: string;
+  store: Record<string, SessionEntry>;
+  modelCatalog?: ModelCatalogEntry[];
+  opts: SessionsListParams;
+  rowContextStore?: Record<string, SessionEntry>;
+  sqlSelection: SqlSessionEntrySelection;
+};
+
+export type SessionListLineageSqlQuery = {
+  excludeLineageSessionKeys?: string[];
+  includeLineageSessionKeys?: string[];
+  lineageKeys?: string[];
+};
+
+function sessionKeyAliasCandidates(sessionKey: string): string[] {
+  const normalized = normalizeStoreSessionKey(sessionKey);
+  return [...new Set([sessionKey, normalized, ...foldedSessionKeyAliasCandidates(normalized)])];
 }
 
-function sortSessionCreatorIdentities(
-  creators: Map<string, { id: string; label?: string }>,
-): Array<{ id: string; label?: string }> {
-  return [...creators.values()].toSorted((a, b) => {
-    const byLabel = (a.label ?? a.id).localeCompare(b.label ?? b.id);
-    return byLabel || a.id.localeCompare(b.id);
-  });
+/** Converts the current runtime lineage snapshot into exact SQL include/exclude keys. */
+export function resolveSessionListLineageSqlQuery(
+  spawnedBy: string | undefined,
+  now = Date.now(),
+  mainKey?: string,
+): SessionListLineageSqlQuery {
+  const parentKey = normalizeOptionalString(spawnedBy);
+  if (!parentKey) {
+    return {};
+  }
+  const index = buildSubagentRunReadIndex(now);
+  const canonicalChildKeys = new Set<string>();
+  for (const runs of index.runsByControllerSessionKey.values()) {
+    for (const run of runs) {
+      if (run.childSessionKey.trim()) {
+        canonicalChildKeys.add(run.childSessionKey.trim());
+      }
+    }
+  }
+  const childKeys = new Set<string>();
+  const include = new Set<string>();
+  for (const childKey of canonicalChildKeys) {
+    const aliases = sessionKeyAliasCandidates(childKey);
+    for (const alias of aliases) {
+      childKeys.add(alias);
+    }
+    const latest = index.getDisplaySubagentRun(childKey);
+    const owner =
+      normalizeOptionalString(latest?.controllerSessionKey) ||
+      normalizeOptionalString(latest?.requesterSessionKey);
+    if (
+      latest &&
+      owner === parentKey &&
+      shouldKeepSubagentRunChildLink(latest, {
+        activeDescendants: index.countActiveDescendantRuns(childKey),
+        now,
+      })
+    ) {
+      for (const alias of aliases) {
+        include.add(alias);
+      }
+    }
+  }
+  // Registry ownership overrides stale stored lineage after a child moves. These sets project
+  // that authority into SQL; combined-store federation remains with the deferred goal-3 follow-up.
+  const parsedParent = parseAgentSessionKey(parentKey);
+  const legacyMain =
+    parsedParent &&
+    normalizeOptionalString(mainKey)?.toLowerCase() === parsedParent.rest.toLowerCase()
+      ? "main"
+      : undefined;
+  return {
+    ...(childKeys.size > 0 ? { excludeLineageSessionKeys: [...childKeys] } : {}),
+    ...(include.size > 0 ? { includeLineageSessionKeys: [...include] } : {}),
+    lineageKeys: [
+      ...new Set([
+        ...sessionKeyAliasCandidates(parentKey),
+        ...[parsedParent?.rest, legacyMain].filter(Boolean),
+      ]),
+    ] as string[],
+  };
+}
+
+export function buildSessionListSqlQuery(
+  opts: SessionsListParams,
+  params: { bounded: boolean; includeCreatorFilter: boolean; mainKey?: string; now: number },
+): { lineage: SessionListLineageSqlQuery; query: SessionEntryListQuery } {
+  const activeMinutes =
+    typeof opts.activeMinutes === "number" && Number.isFinite(opts.activeMinutes)
+      ? Math.max(1, Math.floor(opts.activeMinutes))
+      : undefined;
+  const lineage = resolveSessionListLineageSqlQuery(opts.spawnedBy, params.now, params.mainKey);
+  const query: SessionEntryListQuery = {
+    archived: opts.archived ?? false,
+    includeGlobal: opts.includeGlobal === true,
+    includeUnknown: !opts.agentId && opts.includeUnknown === true,
+    sortBy: opts.sortBy ?? "updatedAt",
+    ...lineage,
+  };
+  if (activeMinutes !== undefined) {
+    query.activeAfter = params.now - activeMinutes * 60_000;
+  }
+  const creatorId = normalizeOptionalString(opts.creatorId);
+  const label = normalizeOptionalString(opts.label);
+  const spawnedBy = normalizeOptionalString(opts.spawnedBy);
+  if (params.includeCreatorFilter && creatorId) {
+    query.createdActorId = creatorId;
+  }
+  if (label) {
+    query.label = label;
+  }
+  if (spawnedBy) {
+    query.spawnedBy = spawnedBy;
+  }
+  if (opts.requireLastInteraction) {
+    query.requireLastInteraction = true;
+  }
+  if (params.bounded) {
+    query.limit = resolveSessionsListOffset(opts) + (resolveSessionsListLimit(opts, 100) ?? 100);
+  }
+  return { lineage, query };
 }
 
 function populateSessionListAcpMetadata(params: {
@@ -144,143 +261,79 @@ function resolveSessionsListWindowLimit(limit: number | undefined, offset: numbe
   return Number.isFinite(windowLimit) ? Math.min(windowLimit, Number.MAX_SAFE_INTEGER) : undefined;
 }
 
-function filterSessionEntries(params: {
+function filterResidualSessionEntries(params: {
   cfg: OpenClawConfig;
   store: Record<string, SessionEntry>;
   opts: SessionsListParams;
   now: number;
-  userProfileLabelById?: Map<string, string | undefined>;
+  rowContext?: SessionListRowContext;
   getRowContext?: SessionListRowContextProvider;
-}): Pick<SessionEntrySelection, "creators" | "entries"> {
-  const { cfg, store, opts, now } = params;
-  const includeGlobal = opts.includeGlobal === true;
-  const includeUnknown = opts.includeUnknown === true;
-  const spawnedBy = typeof opts.spawnedBy === "string" ? opts.spawnedBy : "";
-  const label = normalizeOptionalString(opts.label) ?? "";
+  sqlSelection: SqlSessionEntrySelection;
+}): SessionEntryPair[] {
+  const { cfg, store, opts } = params;
   const boardFace = opts.boardFace;
-  const agentId = typeof opts.agentId === "string" ? normalizeAgentId(opts.agentId) : "";
   const search = normalizeLowercaseStringOrEmpty(opts.search);
-  const activeMinutes =
-    typeof opts.activeMinutes === "number" && Number.isFinite(opts.activeMinutes)
-      ? Math.max(1, Math.floor(opts.activeMinutes))
-      : undefined;
-  const creatorId = normalizeOptionalString(opts.creatorId);
-  const activeCutoff = activeMinutes === undefined ? undefined : now - activeMinutes * 60_000;
-  const entries: SessionEntryPair[] = [];
-  const creators = new Map<string, { id: string; label?: string }>();
+  const spawnedBy = normalizeOptionalString(opts.spawnedBy);
+  const lineage =
+    params.sqlSelection?.lineage ??
+    resolveSessionListLineageSqlQuery(spawnedBy, params.now, params.cfg.session?.mainKey);
 
-  for (const [key, entry] of Object.entries(store)) {
-    if (
-      isCronRunSessionKey(key) ||
-      (!includeGlobal && key === "global") ||
-      (!includeUnknown && key === "unknown")
-    ) {
-      continue;
-    }
-    if (agentId) {
-      if (key === "global") {
-        if (!includeGlobal) {
-          continue;
-        }
-      } else if (key === "unknown") {
-        continue;
-      } else {
-        const parsed = parseAgentSessionKey(key);
-        if (!parsed || normalizeAgentId(parsed.agentId) !== agentId) {
-          continue;
-        }
+  let entries = Object.entries(store)
+    .filter(([key, entry]) => {
+      if (!spawnedBy) {
+        return true;
       }
-    }
-    if (isPhantomAgentStoreListEntry(key, entry)) {
-      continue;
-    }
-    if (spawnedBy) {
-      if (key === "unknown" || key === "global") {
-        continue;
+      if (lineage.excludeLineageSessionKeys?.includes(key)) {
+        return lineage.includeLineageSessionKeys?.includes(key) === true;
       }
-      const filterRowContext = resolveSessionListRowContext(params);
-      const latest = filterRowContext
-        ? filterRowContext.subagentRuns.getDisplaySubagentRun(key)
-        : getSessionDisplaySubagentRunByChildSessionKey(key);
-      const keepSpawned = latest
-        ? (normalizeOptionalString(latest.controllerSessionKey) ||
-            normalizeOptionalString(latest.requesterSessionKey)) === spawnedBy &&
-          shouldKeepSubagentRunChildLink(latest, {
-            activeDescendants: filterRowContext
-              ? filterRowContext.subagentRuns.countActiveDescendantRuns(key)
-              : countActiveDescendantRuns(key),
-            now,
-          })
-        : shouldKeepStoreOnlyChildLink(entry, now) &&
-          (entry.spawnedBy === spawnedBy || entry.parentSessionKey === spawnedBy);
-      if (!keepSpawned) {
-        continue;
+      return (
+        shouldKeepStoreOnlyChildLink(entry, params.now) &&
+        (entry.spawnedBy === spawnedBy || entry.parentSessionKey === spawnedBy)
+      );
+    })
+    .filter(([, entry]) => {
+      if (opts.requireLastInteraction !== true) {
+        return true;
       }
-    }
-    if (opts.archived !== "all") {
-      const archived = entry.archivedAt !== undefined;
-      if (opts.archived === true ? !archived : archived) {
-        continue;
+      return !normalizeOptionalString(entry?.heartbeatIsolatedBaseSessionKey);
+    })
+    .filter(([, entry]) => {
+      if (!boardFace) {
+        return true;
       }
-    }
-    if (
-      opts.requireLastInteraction === true &&
-      (!isFinitePositiveTimestamp(entry.lastInteractionAt) ||
-        normalizeOptionalString(entry.heartbeatIsolatedBaseSessionKey))
-    ) {
-      continue;
-    }
-    if ((label && entry.label !== label) || (boardFace && entry.boardFace !== boardFace)) {
-      continue;
-    }
-    if (search) {
+      return entry?.boardFace === boardFace;
+    });
+
+  if (search) {
+    entries = entries.filter(([key, entry]) => {
       const cheapFields = [
         resolveSessionListSearchDisplayName(key, entry),
-        entry.label,
-        entry.subject,
-        entry.sessionId,
+        entry?.label,
+        entry?.subject,
+        entry?.sessionId,
         key,
       ];
       appendStoredSessionModelSearchFields(cheapFields, entry);
-      const cheapMatch = matchesSessionListSearch(cheapFields, search);
-      const derivedMatch =
-        !cheapMatch &&
-        shouldResolveDerivedSessionModelSearchFields(search) &&
-        matchesSessionListSearch(
-          resolveSessionListSearchModelFields({
-            cfg,
-            key,
-            entry,
-            rowContext: resolveSessionListRowContext(params),
-          }),
-          search,
-        );
-      if (!cheapMatch && !derivedMatch) {
-        continue;
+      if (matchesSessionListSearch(cheapFields, search)) {
+        return true;
       }
-    }
-    if (activeCutoff !== undefined && (entry.updatedAt ?? 0) < activeCutoff) {
-      continue;
-    }
-    if (params.userProfileLabelById) {
-      addSessionCreatorIdentity(creators, entry, params.userProfileLabelById);
-    }
-    if (creatorId && entry.createdActor?.id !== creatorId) {
-      continue;
-    }
-    entries.push([key, entry]);
+      if (!shouldResolveDerivedSessionModelSearchFields(search)) {
+        return false;
+      }
+      const searchRowContext = resolveSessionListRowContext(params);
+      return matchesSessionListSearch(
+        resolveSessionListSearchModelFields({
+          cfg,
+          key,
+          entry,
+          rowContext: searchRowContext,
+        }),
+        search,
+      );
+    });
   }
 
-  return { entries, creators: sortSessionCreatorIdentities(creators) };
-}
-
-function isPhantomAgentStoreListEntry(key: string, entry: SessionEntry | undefined): boolean {
-  const parsed = parseAgentSessionKey(key);
-  return (
-    parsed?.rest === "sessions" &&
-    !normalizeOptionalString(entry?.sessionId) &&
-    entry?.updatedAt == null
-  );
+  return entries;
 }
 
 function selectSessionEntries(params: {
@@ -288,23 +341,33 @@ function selectSessionEntries(params: {
   store: Record<string, SessionEntry>;
   opts: SessionsListParams;
   now: number;
+  rowContext?: SessionListRowContext;
   getRowContext?: SessionListRowContextProvider;
   defaultLimit?: number;
-  userProfileLabelById?: Map<string, string | undefined>;
+  sqlSelection: SqlSessionEntrySelection;
 }): SessionEntrySelection {
-  const { creators, entries: filtered } = filterSessionEntries(params);
+  const creatorEntries = filterResidualSessionEntries(params);
+  const creatorId = normalizeOptionalString(params.opts.creatorId);
+  const filtered =
+    creatorId && params.sqlSelection?.creatorFilterApplied === false
+      ? creatorEntries.filter(([, entry]) => entry.createdActor?.id === creatorId)
+      : creatorEntries;
   const limit = resolveSessionsListLimit(params.opts, params.defaultLimit);
   const offset = resolveSessionsListOffset(params.opts);
   const windowLimit = resolveSessionsListWindowLimit(limit, offset);
-  const sortedWindow = sortAndLimitSessionEntries(filtered, windowLimit, params.opts.sortBy);
+  const sorted = params.sqlSelection.ordered
+    ? filtered
+    : filtered.toSorted((left, right) => compareSessionEntries(left, right, params.opts.sortBy));
+  const sortedWindow = windowLimit === undefined ? sorted : sorted.slice(0, windowLimit);
   const entries =
     limit === undefined ? sortedWindow.slice(offset) : sortedWindow.slice(offset, offset + limit);
   const nextOffset = offset + entries.length;
-  const hasMore = nextOffset < filtered.length;
+  const totalCount = params.sqlSelection?.totalCount ?? filtered.length;
+  const hasMore = nextOffset < totalCount;
   return {
     entries,
-    creators,
-    totalCount: filtered.length,
+    creatorEntries,
+    totalCount,
     limitApplied: limit,
     offset,
     nextOffset: hasMore ? nextOffset : null,
@@ -312,38 +375,51 @@ function selectSessionEntries(params: {
   };
 }
 
-export function filterAndSortSessionEntries(params: {
-  cfg: OpenClawConfig;
-  store: Record<string, SessionEntry>;
-  opts: SessionsListParams;
-  now: number;
-}): [string, SessionEntry][] {
-  return selectSessionEntries(params).entries;
+function listSessionCreatorIdentities(
+  entries: readonly SessionEntryPair[],
+  userProfileLabelById: Map<string, string | undefined>,
+  creatorActors?: readonly NonNullable<SessionEntry["createdActor"]>[],
+): Array<{ id: string; label?: string }> {
+  const creators = new Map<string, { id: string; label?: string }>();
+  for (const creator of creatorActors ?? []) {
+    const actor = projectSessionActor(creator, userProfileLabelById);
+    const id = normalizeOptionalString(actor?.id);
+    if (id) {
+      creators.set(id, { id, ...(actor?.label ? { label: actor.label } : {}) });
+    }
+  }
+  for (const [, entry] of entries) {
+    const actor = projectSessionActor(entry.createdActor, userProfileLabelById);
+    const id = normalizeOptionalString(actor?.id);
+    if (!id) {
+      continue;
+    }
+    const label = normalizeOptionalString(actor?.label);
+    const existing = creators.get(id);
+    if (!existing || (label && (!existing.label || label.localeCompare(existing.label) < 0))) {
+      creators.set(id, { id, ...(label ? { label } : {}) });
+    }
+  }
+  return [...creators.values()].toSorted((a, b) => {
+    const byLabel = (a.label ?? a.id).localeCompare(b.label ?? b.id);
+    return byLabel || a.id.localeCompare(b.id);
+  });
 }
 
-export function listSessionsFromStore(params: {
-  cfg: OpenClawConfig;
-  storePath: string;
-  store: Record<string, SessionEntry>;
-  modelCatalog?: ModelCatalogEntry[];
-  opts: SessionsListParams;
-}): SessionsListResult {
-  const { cfg, storePath, store, opts } = params;
+function prepareSessionList(params: SessionListBuildParams) {
+  const { cfg, store, opts } = params;
+  const contextStore = params.rowContextStore ?? store;
   const now = Date.now();
-  const sessionListTranscriptUsageMaxBytes = 64 * 1024;
-  const sessionListTranscriptFieldRows = 100;
-  // Creator facets and rows must share one profile-label snapshot. Every row context in this
-  // public list call is built with this map below, so a profile rename cannot split the response.
+  // Creator facets and rows share one profile-label snapshot for the whole response.
   const userProfileLabelById = new Map<string, string | undefined>();
   let rowContext: SessionListRowContext | undefined;
-  const getRowContext = () => {
-    rowContext ??= buildSessionListRowContext({ store, now, userProfileLabelById });
-    return rowContext;
-  };
-  const includeDerivedTitles = opts.includeDerivedTitles === true;
-  const includeLastMessage = opts.includeLastMessage === true;
-  const hasSpawnedByFilter = typeof opts.spawnedBy === "string" && opts.spawnedBy.length > 0;
-
+  const getRowContext = () =>
+    (rowContext ??= buildSessionListRowContext({
+      store: contextStore,
+      now,
+      userProfileLabelById,
+    }));
+  const hasSpawnedByFilter = Boolean(normalizeOptionalString(opts.spawnedBy));
   const selection = selectSessionEntries({
     cfg,
     store,
@@ -354,59 +430,88 @@ export function listSessionsFromStore(params: {
         ? getRowContext
         : undefined,
     defaultLimit: SESSIONS_LIST_DEFAULT_LIMIT,
-    userProfileLabelById,
+    sqlSelection: params.sqlSelection,
   });
-  const { entries, creators, totalCount, limitApplied, offset, nextOffset, hasMore } = selection;
   const fullRowContext =
-    rowContext || hasSpawnedByFilter || entries.length > SESSIONS_LIST_YIELD_BATCH_SIZE
+    rowContext || hasSpawnedByFilter || selection.entries.length > SESSIONS_LIST_YIELD_BATCH_SIZE
       ? getRowContext()
       : undefined;
   const sharedRowContext =
     fullRowContext ??
-    (entries.length > 0
+    (selection.entries.length > 0
       ? buildSessionListRowMetadataContext({ now, userProfileLabelById })
       : undefined);
-  populateSessionListAcpMetadata({ cfg, entries, opts, rowContext: sharedRowContext });
+  populateSessionListAcpMetadata({
+    cfg,
+    entries: selection.entries,
+    opts,
+    rowContext: sharedRowContext,
+  });
+  return { ...selection, contextStore, fullRowContext, now, sharedRowContext };
+}
 
-  const sessions = entries.map(([key, entry], index) => {
-    const includeTranscriptFields = index < sessionListTranscriptFieldRows;
+function buildSessionsListResult(
+  params: SessionListBuildParams,
+  prepared: ReturnType<typeof prepareSessionList>,
+  sessions: GatewaySessionRow[],
+): SessionsListResult {
+  return {
+    ts: prepared.now,
+    path: params.storePath,
+    count: sessions.length,
+    totalCount: prepared.totalCount,
+    limitApplied: prepared.limitApplied,
+    offset: prepared.offset > 0 ? prepared.offset : undefined,
+    nextOffset: prepared.nextOffset,
+    hasMore: prepared.hasMore,
+    creators: listSessionCreatorIdentities(
+      prepared.creatorEntries,
+      prepared.sharedRowContext?.userProfileLabelById ?? new Map(),
+      params.sqlSelection.creatorActors,
+    ),
+    defaults: getSessionDefaults(params.cfg, params.modelCatalog, {
+      allowPluginNormalization: false,
+    }),
+    sessions,
+  };
+}
+
+export function listSessionsFromStore(params: SessionListBuildParams): SessionsListResult {
+  const { cfg, storePath, opts } = params;
+  const prepared = prepareSessionList(params);
+  const includeDerivedTitles = opts.includeDerivedTitles === true;
+  const includeLastMessage = opts.includeLastMessage === true;
+  const sessions = prepared.entries.map(([key, entry], index) => {
+    const includeTranscriptFields = index < 100;
     const rowAgentId =
       key === "global" && typeof opts.agentId === "string"
         ? normalizeAgentId(opts.agentId)
         : undefined;
     const storeChildSessionsByKey =
-      fullRowContext?.storeChildSessionsByKey ??
-      buildSingleRowStoreChildSessionsByKey({ store, storePath, key, now });
+      prepared.fullRowContext?.storeChildSessionsByKey ??
+      buildSingleRowStoreChildSessionsByKey({
+        store: prepared.contextStore,
+        storePath,
+        key,
+        now: prepared.now,
+      });
     return buildGatewaySessionRow({
       cfg,
       storePath,
-      store,
+      store: prepared.contextStore,
       key,
       entry,
       agentId: rowAgentId,
       modelCatalog: params.modelCatalog,
-      now,
+      now: prepared.now,
       includeDerivedTitles: includeTranscriptFields && includeDerivedTitles,
       includeLastMessage: includeTranscriptFields && includeLastMessage,
-      transcriptUsageMaxBytes: sessionListTranscriptUsageMaxBytes,
+      transcriptUsageMaxBytes: 64 * 1024,
       storeChildSessionsByKey,
-      rowContext: sharedRowContext,
+      rowContext: prepared.sharedRowContext,
     });
   });
-
-  return {
-    ts: now,
-    path: storePath,
-    count: sessions.length,
-    totalCount,
-    limitApplied,
-    offset: offset > 0 ? offset : undefined,
-    nextOffset,
-    hasMore,
-    creators,
-    defaults: getSessionDefaults(cfg, params.modelCatalog, { allowPluginNormalization: false }),
-    sessions,
-  };
+  return buildSessionsListResult(params, prepared, sessions);
 }
 
 /**
@@ -414,97 +519,58 @@ export function listSessionsFromStore(params: {
  * batches of session row builds. This prevents large session stores from
  * blocking the event loop during sessions.list requests.
  *
- * The synchronous file I/O in readSessionTitleFieldsFromTranscript (head/tail
- * reads for derived titles and last-message previews) is the dominant blocker.
+ * Transcript reads for last-message previews remain the dominant blocker.
  * By yielding every SESSIONS_LIST_YIELD_BATCH_SIZE rows, we keep the event
  * loop responsive for WebSocket heartbeats, channel I/O, and concurrent RPC.
  */
-export async function listSessionsFromStoreAsync(params: {
-  cfg: OpenClawConfig;
-  storePath: string;
-  store: Record<string, SessionEntry>;
-  modelCatalog?: ModelCatalogEntry[];
-  opts: SessionsListParams;
-}): Promise<SessionsListResult> {
+export async function listSessionsFromStoreAsync(
+  params: SessionListBuildParams,
+): Promise<SessionsListResult> {
   // Pin the active plugin-registry workspace dir for the duration of this
   // call so per-row metadata lookups use a stable memo key. Without this pin,
   // concurrent agent turns / crons mutate the process-global workspace dir
   // between rows, the memo never hits, and each row triggers a full
   // loadPluginMetadataSnapshot scan (~100 ms).
   return withPinnedActivePluginRegistryWorkspaceDir(async () => {
-    const { cfg, storePath, store, opts } = params;
-    const now = Date.now();
-    const sessionListTranscriptUsageMaxBytes = 64 * 1024;
-    const sessionListTranscriptFieldRows = 100;
-    // Creator facets and rows must share one profile-label snapshot. Every row context in this
-    // public list call is built with this map below, so a profile rename cannot split the response.
-    const userProfileLabelById = new Map<string, string | undefined>();
-    let rowContext: SessionListRowContext | undefined;
-    const getRowContext = () => {
-      rowContext ??= buildSessionListRowContext({ store, now, userProfileLabelById });
-      return rowContext;
-    };
+    const { cfg, storePath, opts } = params;
+    const prepared = prepareSessionList(params);
     const includeDerivedTitles = opts.includeDerivedTitles === true;
     const includeLastMessage = opts.includeLastMessage === true;
-    const hasSpawnedByFilter = typeof opts.spawnedBy === "string" && opts.spawnedBy.length > 0;
-
-    const selection = selectSessionEntries({
-      cfg,
-      store,
-      opts,
-      now,
-      getRowContext:
-        hasSpawnedByFilter || Boolean(normalizeOptionalString(opts.search))
-          ? getRowContext
-          : undefined,
-      defaultLimit: SESSIONS_LIST_DEFAULT_LIMIT,
-      userProfileLabelById,
-    });
-    const { entries, creators, totalCount, limitApplied, offset, nextOffset, hasMore } = selection;
-    const fullRowContext =
-      rowContext || hasSpawnedByFilter || entries.length > SESSIONS_LIST_YIELD_BATCH_SIZE
-        ? getRowContext()
-        : undefined;
-    const sharedRowContext =
-      fullRowContext ??
-      (entries.length > 0
-        ? buildSessionListRowMetadataContext({ now, userProfileLabelById })
-        : undefined);
-    populateSessionListAcpMetadata({ cfg, entries, opts, rowContext: sharedRowContext });
 
     const sessions: GatewaySessionRow[] = [];
-    for (let i = 0; i < entries.length; i++) {
-      const [key, entry] = expectDefined(entries[i], "entries entry at i");
-      const includeTranscriptFields = i < sessionListTranscriptFieldRows;
+    for (let i = 0; i < prepared.entries.length; i++) {
+      const [key, entry] = expectDefined(prepared.entries[i], "entries entry at i");
+      const includeTranscriptFields = i < 100;
       const rowAgentId =
         key === "global" && typeof opts.agentId === "string"
           ? normalizeAgentId(opts.agentId)
           : undefined;
       const storeChildSessionsByKey =
-        fullRowContext?.storeChildSessionsByKey ??
-        buildSingleRowStoreChildSessionsByKey({ store, storePath, key, now });
+        prepared.fullRowContext?.storeChildSessionsByKey ??
+        buildSingleRowStoreChildSessionsByKey({
+          store: prepared.contextStore,
+          storePath,
+          key,
+          now: prepared.now,
+        });
       const row = buildGatewaySessionRow({
         cfg,
         storePath,
-        store,
+        store: prepared.contextStore,
         key,
         entry,
         agentId: rowAgentId,
         modelCatalog: params.modelCatalog,
-        now,
-        includeDerivedTitles: false,
+        now: prepared.now,
+        includeDerivedTitles: includeTranscriptFields && includeDerivedTitles,
         includeLastMessage: false,
-        transcriptUsageMaxBytes: sessionListTranscriptUsageMaxBytes,
+        transcriptUsageMaxBytes: 64 * 1024,
         storeChildSessionsByKey,
-        rowContext: sharedRowContext,
+        rowContext: prepared.sharedRowContext,
         skipTranscriptUsageFallback: true,
         lightweightListRow: true,
       });
-      if (
-        entry?.sessionId &&
-        includeTranscriptFields &&
-        (includeDerivedTitles || includeLastMessage)
-      ) {
+      if (entry?.sessionId && includeTranscriptFields && includeLastMessage) {
         const parsed = parseAgentSessionKey(key);
         const sessionAgentId =
           rowAgentId ??
@@ -516,9 +582,6 @@ export async function listSessionsFromStoreAsync(params: {
           sessionKey: key,
           storePath,
         });
-        if (includeDerivedTitles) {
-          row.derivedTitle = deriveSessionTitle(entry, fields.firstUserMessage, row.displayName);
-        }
         if (includeLastMessage && fields.lastMessagePreview) {
           row.lastMessagePreview = fields.lastMessagePreview;
         }
@@ -526,25 +589,13 @@ export async function listSessionsFromStoreAsync(params: {
       sessions.push(row);
       // Yield to the event loop between batches so WebSocket heartbeats,
       // channel I/O, and concurrent RPC calls are not starved.
-      if ((i + 1) % SESSIONS_LIST_YIELD_BATCH_SIZE === 0 && i + 1 < entries.length) {
+      if ((i + 1) % SESSIONS_LIST_YIELD_BATCH_SIZE === 0 && i + 1 < prepared.entries.length) {
         await new Promise<void>((resolve) => {
           setImmediate(resolve);
         });
       }
     }
 
-    return {
-      ts: now,
-      path: storePath,
-      count: sessions.length,
-      totalCount,
-      limitApplied,
-      offset: offset > 0 ? offset : undefined,
-      nextOffset,
-      hasMore,
-      creators,
-      defaults: getSessionDefaults(cfg, params.modelCatalog, { allowPluginNormalization: false }),
-      sessions,
-    };
+    return buildSessionsListResult(params, prepared, sessions);
   });
 }

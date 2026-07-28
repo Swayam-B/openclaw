@@ -34,6 +34,7 @@ import {
   normalizeAgentId,
   parseAgentSessionKey,
 } from "../../routing/session-key.js";
+import { listOpenIncognitoAgentDatabases } from "../../state/openclaw-agent-db.js";
 import { resolveRequestedSessionAgentId as resolveRequestedGlobalAgentId } from "../session-create-service.js";
 import {
   canAccessIncognitoSession,
@@ -58,6 +59,7 @@ import type {
 } from "../session-utils-store-lookup.js";
 import {
   buildGatewaySessionRow,
+  buildSessionListSqlQuery,
   listSessionsFromStoreAsync,
   loadCombinedSessionStoreForGateway,
   resolveFreshestSessionEntryFromStoreKeys,
@@ -232,15 +234,44 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
     const p = params;
     const cfg = context.getRuntimeConfig();
     const configuredAgentsOnly = p.configuredAgentsOnly === true;
+    const now = Date.now();
+    const identity = gatewayClientSessionCreator(client);
+    const hasOpenIncognito = listOpenIncognitoAgentDatabases().length > 0;
+    // This is exactly when filterDraftSessionsForClient can remove rows after SQL selection.
+    const requiresClientVisibilityFilter = !isGatewayAdmin(client) && Boolean(identity);
+    const hasFacetResidualFilters =
+      Boolean(normalizeOptionalString(p.search)) ||
+      Boolean(p.boardFace) ||
+      Boolean(normalizeOptionalString(p.spawnedBy)) ||
+      p.requireLastInteraction === true ||
+      configuredAgentsOnly ||
+      hasOpenIncognito ||
+      !p.agentId ||
+      !isPerAgentSessionStoreConfig(cfg.session?.store) ||
+      requiresClientVisibilityFilter;
+    const hasResidualFilters =
+      hasFacetResidualFilters ||
+      !p.agentId ||
+      !isPerAgentSessionStoreConfig(cfg.session?.store) ||
+      hasOpenIncognito ||
+      requiresClientVisibilityFilter;
+    const { lineage: lineageQuery, query } = buildSessionListSqlQuery(p, {
+      bounded: !hasResidualFilters,
+      includeCreatorFilter: !hasFacetResidualFilters,
+      mainKey: cfg.session?.mainKey,
+      now,
+    });
     const payload = await measureDiagnosticsTimelineSpan(
       "gateway.sessions.list",
       async () => {
-        const { durableStorePath, storePath, store } = measureDiagnosticsTimelineSpanSync(
+        const loaded = measureDiagnosticsTimelineSpanSync(
           "gateway.sessions.list.store_load",
           () =>
             loadCombinedSessionStoreForGateway(cfg, {
               agentId: p.agentId,
+              includeRowContext: true,
               projection: "list",
+              query,
             }),
           {
             config: cfg,
@@ -251,15 +282,26 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
             },
           },
         );
-        const visibleStore = filterDraftSessionsForClient({ client, store });
+        const visibleStore = filterDraftSessionsForClient({ client, store: loaded.store });
+        const visibilityFiltered = visibleStore !== loaded.store;
         const listStore = configuredAgentsOnly
           ? filterSessionStoreToConfiguredAgents(cfg, visibleStore)
           : visibleStore;
-        const visibleStorePath = Object.entries(listStore).some(
+        let listRowContextStore = loaded.rowContextStore
+          ? filterDraftSessionsForClient({ client, store: loaded.rowContextStore })
+          : undefined;
+        if (configuredAgentsOnly && listRowContextStore) {
+          listRowContextStore = filterSessionStoreToConfiguredAgents(cfg, listRowContextStore);
+        }
+        const includesIncognito = Object.entries(listStore).some(
           ([sessionKey, entry]) => entry.incognito === true || isIncognitoSessionKey(sessionKey),
-        )
-          ? storePath
-          : (durableStorePath ?? storePath);
+        );
+        const exactSqlSelection =
+          loaded.selectionExact && !hasResidualFilters && !includesIncognito && !visibilityFiltered;
+        const canUseCreatorActors = exactSqlSelection && !hasFacetResidualFilters;
+        const visibleStorePath = includesIncognito
+          ? loaded.storePath
+          : (loaded.durableStorePath ?? loaded.storePath);
         const modelCatalog = await measureDiagnosticsTimelineSpan(
           "gateway.sessions.list.model_catalog",
           () =>
@@ -282,6 +324,14 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
               store: listStore,
               modelCatalog,
               opts: p,
+              ...(listRowContextStore ? { rowContextStore: listRowContextStore } : {}),
+              sqlSelection: {
+                ...(canUseCreatorActors ? { creatorActors: loaded.creatorActors } : {}),
+                creatorFilterApplied: !hasFacetResidualFilters,
+                ...(exactSqlSelection ? { totalCount: loaded.totalCount } : {}),
+                lineage: lineageQuery,
+                ordered: exactSqlSelection,
+              },
             }),
           {
             config: cfg,
@@ -291,7 +341,7 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
             },
           },
         );
-        const identityId = gatewayClientSessionCreator(client)?.id;
+        const identityId = identity?.id;
         const { sharingTargets, membershipKeys } = await measureDiagnosticsTimelineSpan(
           "gateway.sessions.list.sharing",
           () => {
