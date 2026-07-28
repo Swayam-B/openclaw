@@ -926,6 +926,63 @@ async function runBeforeInstallHook(params: {
     const normalizedPlugins = normalizePluginsConfig(config.plugins);
     const workspaceDir =
       params.workspaceDir ?? resolveAgentWorkspaceDir(config, resolveDefaultAgentId(config));
+    const currentLoadPathSelections = await Promise.all(
+      normalizedPlugins.loadPaths.map(async (loadPath) => {
+        const resolvedPath = path.resolve(resolveUserPath(loadPath, process.env));
+        const comparablePaths = new Set([resolvedPath]);
+        try {
+          const stat = await fs.stat(resolvedPath);
+          comparablePaths.add(await fs.realpath(resolvedPath));
+          return {
+            allowsDescendants: stat.isDirectory(),
+            paths: [...comparablePaths],
+          };
+        } catch {
+          try {
+            const linkTarget = await fs.readlink(resolvedPath);
+            comparablePaths.add(path.resolve(path.dirname(resolvedPath), linkTarget));
+          } catch {
+            // Missing configured directories have no extra path identity to recover.
+          }
+          return {
+            allowsDescendants: true,
+            paths: [...comparablePaths],
+          };
+        }
+      }),
+    );
+    const recordComparablePaths = (plugin: {
+      manifestPath?: string;
+      rootDir?: string;
+      source?: string;
+      setupSource?: string;
+      packageJson?: {
+        path: string;
+      };
+    }) => {
+      const packageJsonPath =
+        plugin.packageJson?.path && plugin.rootDir
+          ? path.resolve(plugin.rootDir, plugin.packageJson.path)
+          : undefined;
+      return [
+        plugin.manifestPath,
+        plugin.rootDir,
+        plugin.source,
+        plugin.setupSource,
+        packageJsonPath,
+      ]
+        .filter((value): value is string => value !== undefined)
+        .map((value) => path.resolve(value));
+    };
+    const loadPathSelectionContains = (
+      selection: (typeof currentLoadPathSelections)[number],
+      candidatePath: string,
+    ) =>
+      selection.paths.some(
+        (selectedPath) =>
+          selectedPath === candidatePath ||
+          (selection.allowsDescendants && isSamePathOrInside(selectedPath, candidatePath)),
+      );
     const pluginIndex = loadPluginRegistrySnapshot({
       config,
       installRecords: loadInstalledPluginIndexInstallRecordsSync({ env: process.env }),
@@ -963,17 +1020,18 @@ async function runBeforeInstallHook(params: {
     ) => {
       if (diagnostic.source !== undefined) {
         const diagnosticSource = path.resolve(diagnostic.source);
-        const packageJsonPath = plugin.packageJson?.path
-          ? path.resolve(plugin.rootDir, plugin.packageJson.path)
-          : undefined;
-        return [
-          plugin.manifestPath,
-          plugin.rootDir,
-          plugin.source,
-          plugin.setupSource,
-          packageJsonPath,
-        ].some(
-          (recordPath) => recordPath !== undefined && path.resolve(recordPath) === diagnosticSource,
+        const recordPaths = recordComparablePaths(plugin);
+        if (recordPaths.includes(diagnosticSource)) {
+          return true;
+        }
+        const configuredContainer = currentLoadPathSelections.find((selection) =>
+          selection.paths.includes(diagnosticSource),
+        );
+        return (
+          configuredContainer !== undefined &&
+          recordPaths.some((recordPath) =>
+            loadPathSelectionContains(configuredContainer, recordPath),
+          )
         );
       }
       return (
@@ -1034,32 +1092,15 @@ async function runBeforeInstallHook(params: {
     for (const plugin of pluginIndex.plugins) {
       pluginRecords.set(normalizePluginPolicyId(plugin.pluginId), plugin);
     }
-    const currentLoadPathSelections = await Promise.all(
-      normalizedPlugins.loadPaths.map(async (loadPath) => {
-        const resolvedPath = path.resolve(resolveUserPath(loadPath, process.env));
-        try {
-          const stat = await fs.stat(resolvedPath);
-          return { isDirectory: stat.isDirectory(), path: resolvedPath };
-        } catch {
-          return { isDirectory: false, path: resolvedPath };
-        }
-      }),
-    );
     const isSelectedByCurrentLoadPath = (plugin: {
       manifestPath?: string;
       rootDir?: string;
       source?: string;
       setupSource?: string;
     }) => {
-      const recordPaths = [plugin.manifestPath, plugin.rootDir, plugin.source, plugin.setupSource]
-        .filter((value): value is string => value !== undefined)
-        .map((value) => path.resolve(value));
+      const recordPaths = recordComparablePaths(plugin);
       return currentLoadPathSelections.some((selection) =>
-        recordPaths.some(
-          (recordPath) =>
-            selection.path === recordPath ||
-            (selection.isDirectory && isSamePathOrInside(selection.path, recordPath)),
-        ),
+        recordPaths.some((recordPath) => loadPathSelectionContains(selection, recordPath)),
       );
     };
     const explicitlyEnabledPluginIds = resolveExplicitEffectivePluginIds(config, {

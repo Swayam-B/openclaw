@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const runInstallPolicyMock = vi.fn();
@@ -878,6 +881,106 @@ describe("legacy file install scan compatibility", () => {
       },
     });
     expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a configured scanner container disappears", async () => {
+    const containerDir = "/plugins/scanners";
+    const rootDir = `${containerDir}/gate`;
+    loadPluginRegistrySnapshotMock.mockReturnValue({
+      diagnostics: [
+        {
+          level: "error",
+          message: `plugin path not found: ${containerDir}`,
+          source: containerDir,
+        },
+      ],
+      plugins: [],
+    });
+    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
+      plugins: [
+        {
+          compat: ["activation-capability-hint"],
+          enabled: true,
+          manifestPath: `${rootDir}/openclaw.plugin.json`,
+          origin: "config",
+          pluginId: "scanner",
+          rootDir,
+          startup: { activationHooks: ["before_install"] },
+        },
+      ],
+    });
+
+    const result = await scanFileInstallSourceRuntime({
+      config: {
+        plugins: {
+          load: { paths: [containerDir] },
+        },
+      },
+      filePath: "/tmp/payload.js",
+      logger: {},
+      pluginId: "payload",
+    });
+
+    expect(result?.blocked).toEqual({
+      code: "security_scan_failed",
+      reason: expect.stringContaining(`plugin path not found: ${containerDir}`),
+    });
+    expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a configured scanner symlink becomes dangling", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-scanner-link-"));
+    const containerTarget = path.join(tempDir, "scanner-target");
+    const configuredLink = path.join(tempDir, "configured-scanners");
+    const rootDir = path.join(containerTarget, "gate");
+    fs.mkdirSync(containerTarget);
+    fs.symlinkSync(containerTarget, configuredLink);
+    fs.rmSync(containerTarget, { recursive: true });
+
+    try {
+      loadPluginRegistrySnapshotMock.mockReturnValue({
+        diagnostics: [
+          {
+            level: "error",
+            message: `plugin path not found: ${configuredLink}`,
+            source: configuredLink,
+          },
+        ],
+        plugins: [],
+      });
+      readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
+        plugins: [
+          {
+            compat: ["activation-capability-hint"],
+            enabled: true,
+            manifestPath: path.join(rootDir, "openclaw.plugin.json"),
+            origin: "config",
+            pluginId: "scanner",
+            rootDir,
+            startup: { activationHooks: ["before_install"] },
+          },
+        ],
+      });
+
+      const result = await scanFileInstallSourceRuntime({
+        config: {
+          plugins: {
+            load: { paths: [configuredLink] },
+          },
+        },
+        filePath: "/tmp/payload.js",
+        logger: {},
+        pluginId: "payload",
+      });
+
+      expect(result?.blocked).toEqual({
+        code: "security_scan_failed",
+        reason: expect.stringContaining(`plugin path not found: ${configuredLink}`),
+      });
+      expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(tempDir, { force: true, recursive: true });
+    }
   });
 
   it("revokes persisted config-path scanner trust after its load path is removed", async () => {
