@@ -934,11 +934,23 @@ async function runBeforeInstallHook(params: {
         rootDir: string;
         source?: string;
         setupSource?: string;
+        packageJson?: {
+          path: string;
+        };
       },
     ) => {
       if (diagnostic.source !== undefined) {
         const diagnosticSource = path.resolve(diagnostic.source);
-        return [plugin.manifestPath, plugin.rootDir, plugin.source, plugin.setupSource].some(
+        const packageJsonPath = plugin.packageJson?.path
+          ? path.resolve(plugin.rootDir, plugin.packageJson.path)
+          : undefined;
+        return [
+          plugin.manifestPath,
+          plugin.rootDir,
+          plugin.source,
+          plugin.setupSource,
+          packageJsonPath,
+        ].some(
           (recordPath) => recordPath !== undefined && path.resolve(recordPath) === diagnosticSource,
         );
       }

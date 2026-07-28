@@ -634,6 +634,64 @@ describe("legacy file install scan compatibility", () => {
     );
   });
 
+  it("recovers a scanner when package metadata discovery fails", async () => {
+    const rootDir = "/plugins/scanner";
+    const packageJsonPath = `${rootDir}/package.json`;
+    loadPluginRegistrySnapshotMock.mockReturnValue({
+      diagnostics: [
+        {
+          level: "error",
+          message: "invalid package install metadata",
+          pluginId: "package-id-hint",
+          source: packageJsonPath,
+        },
+      ],
+      plugins: [],
+    });
+    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
+      plugins: [
+        {
+          compat: ["activation-capability-hint"],
+          manifestPath: `${rootDir}/openclaw.plugin.json`,
+          origin: "global",
+          packageJson: {
+            hash: "package-json-hash",
+            path: "package.json",
+          },
+          pluginId: "canonical-scanner",
+          rootDir,
+          startup: { activationCapabilities: ["hook"] },
+        },
+      ],
+    });
+    resolveManifestActivationPlanMock.mockReturnValue({
+      diagnostics: [],
+      entries: [],
+      pluginIds: [],
+      trigger: { kind: "capability", capability: "hook" },
+    });
+
+    const result = await scanFileInstallSourceRuntime({
+      config: {
+        plugins: {
+          entries: {
+            "canonical-scanner": { enabled: true },
+          },
+        },
+      },
+      filePath: "/tmp/payload.js",
+      logger: {},
+      pluginId: "payload",
+    });
+
+    expect(result?.blocked?.reason).toContain("invalid package install metadata");
+    expect(resolveManifestActivationPlanMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onlyPluginIds: ["canonical-scanner"],
+      }),
+    );
+  });
+
   it("fails closed when a persisted config-path scanner root disappears", async () => {
     const rootDir = "/plugins/missing-scanner";
     loadPluginRegistrySnapshotMock.mockReturnValue({
