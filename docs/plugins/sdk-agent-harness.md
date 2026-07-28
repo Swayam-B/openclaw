@@ -162,9 +162,9 @@ provider, model id, system prompt, user prompt, timeout, abort signal, and strea
 parameters. The harness must not re-resolve credentials, switch routes, reuse a
 native thread, attach tools, invoke agent lifecycle hooks, or deliver output.
 
-Return one `AssistantMessage`. Core accepts only terminal text/thinking content
-with a `stop` or `length` stop reason; tool calls, failed stops, and empty output
-are rejected. If the harness cannot prove these semantics, omit the capability.
+Return `{ assistant: AssistantMessage }`. Core accepts only terminal text/thinking
+content with a `stop` or `length` stop reason; tool calls, failed stops, and empty
+output are rejected. If the harness cannot prove these semantics, omit the capability.
 Callers that require isolated completion then fail closed before invoking that
 harness; OpenClaw does not replay the request through another runtime.
 
