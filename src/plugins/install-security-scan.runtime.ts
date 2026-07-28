@@ -16,6 +16,7 @@ import {
 } from "../security/install-policy.js";
 import { isPathInside } from "../security/scan-paths.js";
 import { resolveManifestActivationPlan } from "./activation-planner.js";
+import { normalizePluginsConfig } from "./config-state.js";
 import {
   findBlockedManifestDependencies,
   findBlockedNodeModulesDirectory,
@@ -43,12 +44,17 @@ type InstallScanLogger = {
 
 function resolveBeforeInstallHookRunner(params: {
   config: OpenClawConfig;
+  disableAllPlugins: boolean;
   disabledPluginIds: ReadonlySet<string>;
   hookProviderIds: readonly string[];
   logger: InstallScanLogger;
   workspaceDir: string;
 }): HookRunner | null {
-  if (params.hookProviderIds.length === 0 && params.disabledPluginIds.size === 0) {
+  if (
+    params.hookProviderIds.length === 0 &&
+    params.disabledPluginIds.size === 0 &&
+    !params.disableAllPlugins
+  ) {
     return getGlobalHookRunner();
   }
   const isolatedRegistry =
@@ -68,7 +74,11 @@ function resolveBeforeInstallHookRunner(params: {
   );
   const includeGlobalPlugin = (pluginId: string) => {
     const normalizedId = normalizePluginPolicyId(pluginId);
-    return !isolatedPluginIds.has(normalizedId) && !params.disabledPluginIds.has(normalizedId);
+    return (
+      !params.disableAllPlugins &&
+      !isolatedPluginIds.has(normalizedId) &&
+      !params.disabledPluginIds.has(normalizedId)
+    );
   };
   const registry: GlobalHookRunnerRegistry = {
     hooks: [
@@ -797,20 +807,33 @@ async function runBeforeInstallHook(params: {
     const workspaceDir =
       params.workspaceDir ?? resolveAgentWorkspaceDir(config, resolveDefaultAgentId(config));
     const pluginIndex = loadPluginRegistrySnapshot({ config, workspaceDir });
-    const currentErrorPluginIds = new Set(
-      (pluginIndex.diagnostics ?? []).flatMap((diagnostic) =>
-        diagnostic.level === "error" && diagnostic.pluginId
-          ? [normalizePluginPolicyId(diagnostic.pluginId)]
-          : [],
-      ),
+    const currentErrorDiagnostics = (pluginIndex.diagnostics ?? []).filter(
+      (diagnostic) => diagnostic.level === "error",
     );
     const persistedPluginIndex =
-      currentErrorPluginIds.size > 0
+      currentErrorDiagnostics.length > 0
         ? readPersistedInstalledPluginIndexSync({ env: process.env })
         : null;
+    const diagnosticMatchesRecord = (
+      diagnostic: (typeof currentErrorDiagnostics)[number],
+      plugin: NonNullable<typeof persistedPluginIndex>["plugins"][number],
+    ) => {
+      if (
+        diagnostic.pluginId &&
+        normalizePluginPolicyId(diagnostic.pluginId) === normalizePluginPolicyId(plugin.pluginId)
+      ) {
+        return true;
+      }
+      return (
+        diagnostic.source !== undefined &&
+        path.resolve(diagnostic.source) === path.resolve(plugin.manifestPath)
+      );
+    };
     const recoveredHookProviderRecords =
       persistedPluginIndex?.plugins.filter((plugin) => {
-        if (!currentErrorPluginIds.has(normalizePluginPolicyId(plugin.pluginId))) {
+        if (
+          !currentErrorDiagnostics.some((diagnostic) => diagnosticMatchesRecord(diagnostic, plugin))
+        ) {
           return false;
         }
         return (
@@ -858,12 +881,26 @@ async function runBeforeInstallHook(params: {
           hookProviderCandidateIds.add(normalizePluginPolicyId(entry.pluginId));
         }
       }
-      const activationErrors = activationPlan.diagnostics.filter(
-        (diagnostic) =>
-          diagnostic.level === "error" &&
-          diagnostic.pluginId !== undefined &&
-          hookProviderCandidateIds.has(normalizePluginPolicyId(diagnostic.pluginId)),
-      );
+      const activationErrors = [
+        ...new Map(
+          [
+            ...currentErrorDiagnostics,
+            ...activationPlan.diagnostics.filter((diagnostic) => diagnostic.level === "error"),
+          ]
+            .filter(
+              (diagnostic) =>
+                (diagnostic.pluginId !== undefined &&
+                  hookProviderCandidateIds.has(normalizePluginPolicyId(diagnostic.pluginId))) ||
+                recoveredHookProviderRecords.some((plugin) =>
+                  diagnosticMatchesRecord(diagnostic, plugin),
+                ),
+            )
+            .map((diagnostic) => [
+              `${diagnostic.pluginId ?? ""}\0${diagnostic.source ?? ""}\0${diagnostic.message}`,
+              diagnostic,
+            ]),
+        ).values(),
+      ];
       if (activationErrors.length > 0) {
         throw new Error(
           `hook provider manifest discovery failed: ${activationErrors
@@ -875,13 +912,19 @@ async function runBeforeInstallHook(params: {
         .filter((entry) => entry.reasons.includes("activation-capability-hint"))
         .map((entry) => entry.pluginId);
     }
-    const disabledPluginIds = new Set(
-      pluginIndex.plugins
+    const normalizedPlugins = normalizePluginsConfig(config.plugins);
+    const disabledPluginIds = new Set([
+      ...normalizedPlugins.deny.map(normalizePluginPolicyId),
+      ...Object.entries(normalizedPlugins.entries).flatMap(([pluginId, entry]) =>
+        entry?.enabled === false ? [normalizePluginPolicyId(pluginId)] : [],
+      ),
+      ...pluginIndex.plugins
         .filter((plugin) => !plugin.enabled)
         .map((plugin) => normalizePluginPolicyId(plugin.pluginId)),
-    );
+    ]);
     const hookRunner = resolveBeforeInstallHookRunner({
       config,
+      disableAllPlugins: !normalizedPlugins.enabled,
       disabledPluginIds,
       hookProviderIds,
       logger: params.logger,

@@ -551,6 +551,58 @@ describe("legacy file install scan compatibility", () => {
     });
   });
 
+  it("recovers a malformed scanner by manifest path when its discovery id hint differs", async () => {
+    const manifestPath = "/plugins/scanner/openclaw.plugin.json";
+    loadPluginRegistrySnapshotMock.mockReturnValue({
+      diagnostics: [
+        {
+          level: "error",
+          message: "scanner manifest could not be parsed",
+          pluginId: "package-id-hint",
+          source: manifestPath,
+        },
+      ],
+      plugins: [],
+    });
+    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
+      plugins: [
+        {
+          compat: ["activation-capability-hint"],
+          manifestPath,
+          origin: "global",
+          pluginId: "canonical-scanner",
+          startup: { activationCapabilities: ["hook"] },
+        },
+      ],
+    });
+    resolveManifestActivationPlanMock.mockReturnValue({
+      diagnostics: [],
+      entries: [],
+      pluginIds: [],
+      trigger: { kind: "capability", capability: "hook" },
+    });
+
+    const result = await scanFileInstallSourceRuntime({
+      config: {
+        plugins: {
+          entries: {
+            "canonical-scanner": { enabled: true },
+          },
+        },
+      },
+      filePath: "/tmp/payload.js",
+      logger: {},
+      pluginId: "payload",
+    });
+
+    expect(result?.blocked?.reason).toContain("scanner manifest could not be parsed");
+    expect(resolveManifestActivationPlanMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onlyPluginIds: ["canonical-scanner"],
+      }),
+    );
+  });
+
   it("ignores unowned manifest errors when another plugin provides hooks", async () => {
     loadPluginRegistrySnapshotMock.mockReturnValue({
       plugins: [

@@ -318,20 +318,27 @@ describe("install hook provider activation", () => {
         OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
         OPENCLAW_STATE_DIR: stateDir,
       },
-      async () => [
-        await scanFileInstallSourceRuntime({
+      async () => {
+        ensurePluginRegistryLoaded({
           config: enabledConfig,
-          filePath: path.join(makeTempDir(), "first.js"),
-          logger: {},
-          pluginId: "first",
-        }),
-        await scanFileInstallSourceRuntime({
-          config: disabledConfig,
-          filePath: path.join(makeTempDir(), "second.js"),
-          logger: {},
-          pluginId: "second",
-        }),
-      ],
+          workspaceDir,
+          onlyPluginIds: [scanner.id],
+        });
+        return [
+          await scanFileInstallSourceRuntime({
+            config: enabledConfig,
+            filePath: path.join(makeTempDir(), "first.js"),
+            logger: {},
+            pluginId: "first",
+          }),
+          await scanFileInstallSourceRuntime({
+            config: disabledConfig,
+            filePath: path.join(makeTempDir(), "second.js"),
+            logger: {},
+            pluginId: "second",
+          }),
+        ];
+      },
     );
 
     expect(enabledResult?.blocked?.reason).toBe("blocked staged target first");
