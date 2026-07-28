@@ -8,6 +8,7 @@ const findBlockedPackageDirectoryInPathMock = vi.fn();
 const findBlockedPackageFileAliasInPathMock = vi.fn();
 const getGlobalHookRunnerMock = vi.fn();
 const getGlobalHookRunnerRegistryMock = vi.fn();
+const getIsolatedGlobalHookRunnerRegistryMock = vi.fn();
 const getActivePluginRegistryMock = vi.fn();
 const getActivePluginRegistryWorkspaceDirMock = vi.fn();
 const collectLivePluginRegistriesMock = vi.fn();
@@ -49,6 +50,7 @@ vi.mock("./hook-runner-global.js", () => ({
 
 vi.mock("./hook-runner-global-state.js", () => ({
   getGlobalHookRunnerRegistry: () => getGlobalHookRunnerRegistryMock(),
+  getIsolatedGlobalHookRunnerRegistry: () => getIsolatedGlobalHookRunnerRegistryMock(),
 }));
 
 vi.mock("./runtime.js", () => ({
@@ -106,6 +108,8 @@ beforeEach(() => {
   getGlobalHookRunnerMock.mockReset();
   getGlobalHookRunnerRegistryMock.mockReset();
   getGlobalHookRunnerRegistryMock.mockReturnValue(null);
+  getIsolatedGlobalHookRunnerRegistryMock.mockReset();
+  getIsolatedGlobalHookRunnerRegistryMock.mockReturnValue(null);
   getActivePluginRegistryMock.mockReset();
   getActivePluginRegistryMock.mockReturnValue(null);
   getActivePluginRegistryWorkspaceDirMock.mockReset();
