@@ -7,7 +7,11 @@ import type { PluginInstallSourceInfo } from "./install-source-info.js";
 import type { InstalledPluginFileSignature } from "./installed-plugin-index-hash.js";
 import type { PluginManifestRecord } from "./manifest-registry.js";
 import type { PluginDiagnostic } from "./manifest-types.js";
-import type { OpenClawPackageBuild, PluginPackageChannel } from "./manifest.js";
+import type {
+  OpenClawPackageBuild,
+  PluginManifestActivationCapability,
+  PluginPackageChannel,
+} from "./manifest.js";
 
 /** Schema version for installed plugin index files. */
 export const INSTALLED_PLUGIN_INDEX_VERSION = 1;
@@ -31,6 +35,8 @@ export type InstalledPluginStartupInfo = {
   memory: boolean;
   deferConfiguredChannelFullLoadUntilAfterListen: boolean;
   agentHarnesses: readonly string[];
+  /** Capability-trigger hints retained for fail-closed activation planning. */
+  activationCapabilities?: readonly PluginManifestActivationCapability[];
   /**
    * Manifest activation.onConfigPaths copied into the installed index for
    * pre-manifest startup scoping. Missing on older persisted index files.

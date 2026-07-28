@@ -33,6 +33,7 @@ function buildStartupInfo(record: PluginManifestRecord): InstalledPluginStartupI
       ...(record.activation?.onAgentHarnesses ?? []),
       ...(record.cliBackends ?? []),
     ]),
+    activationCapabilities: [...new Set(record.activation?.onCapabilities ?? [])].toSorted(),
     configPaths: normalizeSortedUniqueStringEntries(record.activation?.onConfigPaths),
   };
 }

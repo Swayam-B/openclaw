@@ -57,6 +57,7 @@ const InstalledPluginIndexStartupSchema = z.object({
   memory: z.boolean(),
   deferConfiguredChannelFullLoadUntilAfterListen: z.boolean(),
   agentHarnesses: StringArraySchema,
+  activationCapabilities: z.array(z.enum(["provider", "channel", "tool", "hook"])).optional(),
   configPaths: StringArraySchema.optional(),
 });
 

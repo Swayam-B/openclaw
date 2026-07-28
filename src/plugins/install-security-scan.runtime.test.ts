@@ -441,6 +441,15 @@ describe("legacy file install scan compatibility", () => {
   });
 
   it("fails closed when hook-provider manifest discovery reports an error", async () => {
+    loadPluginRegistrySnapshotMock.mockReturnValue({
+      plugins: [
+        {
+          enabled: true,
+          pluginId: "scanner",
+          startup: { activationCapabilities: ["hook"] },
+        },
+      ],
+    });
     resolveManifestActivationPlanMock.mockReturnValue({
       diagnostics: [
         {
@@ -476,6 +485,47 @@ describe("legacy file install scan compatibility", () => {
     });
     expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
     expect(getGlobalHookRunnerMock).not.toHaveBeenCalled();
+  });
+
+  it("ignores manifest errors from explicitly enabled plugins that do not provide hooks", async () => {
+    loadPluginRegistrySnapshotMock.mockReturnValue({
+      plugins: [
+        {
+          enabled: true,
+          pluginId: "broken-provider",
+          startup: { activationCapabilities: ["provider"] },
+        },
+      ],
+    });
+    resolveManifestActivationPlanMock.mockReturnValue({
+      diagnostics: [
+        {
+          level: "error",
+          message: "provider manifest could not be parsed",
+          pluginId: "broken-provider",
+        },
+      ],
+      entries: [],
+      pluginIds: [],
+      trigger: { kind: "capability", capability: "hook" },
+    });
+
+    await expect(
+      scanFileInstallSourceRuntime({
+        config: {
+          plugins: {
+            entries: {
+              "broken-provider": { enabled: true },
+            },
+          },
+        },
+        filePath: "/tmp/payload.js",
+        logger: {},
+        pluginId: "payload",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
   });
 
   it("preserves canonical mixed-case ids and includes config load-path hook providers", async () => {

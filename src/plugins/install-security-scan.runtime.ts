@@ -811,8 +811,22 @@ async function runBeforeInstallHook(params: {
           capability: "hook",
         },
       });
+      const hookProviderCandidateIds = new Set(
+        pluginIndex.plugins
+          .filter((plugin) => plugin.startup?.activationCapabilities?.includes("hook"))
+          .map((plugin) => normalizePluginPolicyId(plugin.pluginId)),
+      );
+      for (const entry of activationPlan.entries) {
+        if (entry.reasons.includes("activation-capability-hint")) {
+          hookProviderCandidateIds.add(normalizePluginPolicyId(entry.pluginId));
+        }
+      }
       const activationErrors = activationPlan.diagnostics.filter(
-        (diagnostic) => diagnostic.level === "error",
+        (diagnostic) =>
+          diagnostic.level === "error" &&
+          (diagnostic.pluginId
+            ? hookProviderCandidateIds.has(normalizePluginPolicyId(diagnostic.pluginId))
+            : hookProviderCandidateIds.size > 0),
       );
       if (activationErrors.length > 0) {
         throw new Error(
