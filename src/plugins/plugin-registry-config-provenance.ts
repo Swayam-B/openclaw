@@ -2,18 +2,18 @@ import { createHash } from "node:crypto";
 import { stableStringify } from "../agents/stable-stringify.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
-import { normalizePluginsConfig } from "./config-state.js";
+import { applyTestPluginDefaults } from "./config-state.js";
 import { normalizePluginPolicyId } from "./plugin-policy-id.js";
 import type { PluginRegistry } from "./registry-types.js";
 
-const registryPluginEntryFingerprints = resolveGlobalSingleton<
+const registryPluginConfigFingerprints = resolveGlobalSingleton<
   WeakMap<PluginRegistry, Map<string, string>>
->(Symbol.for("openclaw.pluginRegistryPluginEntryFingerprints"), () => new WeakMap());
+>(Symbol.for("openclaw.pluginRegistryPluginApiConfigFingerprints"), () => new WeakMap());
 
-function fingerprintPluginEntry(config: OpenClawConfig, pluginId: string): string {
-  const normalizedId = normalizePluginPolicyId(pluginId);
-  const entry = normalizePluginsConfig(config.plugins).entries[normalizedId];
-  return createHash("sha256").update(stableStringify(entry)).digest("hex");
+function fingerprintPluginApiConfig(config: OpenClawConfig): string {
+  return createHash("sha256")
+    .update(stableStringify(applyTestPluginDefaults(config)))
+    .digest("hex");
 }
 
 export function recordPluginRegistryConfigProvenance(params: {
@@ -21,14 +21,14 @@ export function recordPluginRegistryConfigProvenance(params: {
   config: OpenClawConfig;
   pluginId: string;
 }): void {
-  let fingerprints = registryPluginEntryFingerprints.get(params.registry);
+  let fingerprints = registryPluginConfigFingerprints.get(params.registry);
   if (!fingerprints) {
     fingerprints = new Map();
-    registryPluginEntryFingerprints.set(params.registry, fingerprints);
+    registryPluginConfigFingerprints.set(params.registry, fingerprints);
   }
   fingerprints.set(
     normalizePluginPolicyId(params.pluginId),
-    fingerprintPluginEntry(params.config, params.pluginId),
+    fingerprintPluginApiConfig(params.config),
   );
 }
 
@@ -39,7 +39,7 @@ export function pluginRegistryConfigMatches(params: {
 }): boolean {
   const pluginId = normalizePluginPolicyId(params.pluginId);
   return (
-    registryPluginEntryFingerprints.get(params.registry)?.get(pluginId) ===
-    fingerprintPluginEntry(params.config, pluginId)
+    registryPluginConfigFingerprints.get(params.registry)?.get(pluginId) ===
+    fingerprintPluginApiConfig(params.config)
   );
 }

@@ -101,7 +101,8 @@ function writeConfigurableBeforeInstallBlocker(id: string) {
     id,
     filename: `${id}.cjs`,
     body: `module.exports = { id: ${JSON.stringify(id)}, register(api) {
-      const shouldBlock = api.pluginConfig?.block === true;
+      const shouldBlock =
+        api.pluginConfig?.block === true || api.config.commands?.native === true;
       api.on("before_install", () => shouldBlock ? ({
         block: true,
         blockReason: "current scanner config blocks",
@@ -719,6 +720,45 @@ describe("install hook provider activation", () => {
         load: { paths: [scanner.file] },
         entries: {
           [scanner.id]: { config: { block } },
+        },
+      },
+    });
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () => {
+        ensurePluginRegistryLoaded({
+          config: configFor(false),
+          workspaceDir,
+          onlyPluginIds: [scanner.id],
+        });
+        return await scanFileInstallSourceRuntime({
+          config: configFor(true),
+          filePath: path.join(makeTempDir(), "payload.js"),
+          logger: {},
+          pluginId: "payload",
+        });
+      },
+    );
+
+    expect(result?.blocked?.reason).toBe("current scanner config blocks");
+  });
+
+  it("reloads a live scanner when its host config changes", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceDir = makeTempDir();
+    const scanner = writeConfigurableBeforeInstallBlocker("host-reconfigured-scanner");
+    const configFor = (nativeCommands: boolean) => ({
+      agents: { defaults: { workspace: workspaceDir } },
+      commands: { native: nativeCommands },
+      plugins: {
+        load: { paths: [scanner.file] },
+        entries: {
+          [scanner.id]: { config: { block: false } },
         },
       },
     });
