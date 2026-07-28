@@ -17,7 +17,11 @@ import {
   writePlugin,
 } from "./loader.test-fixtures.js";
 import { createEmptyPluginRegistry } from "./registry-empty.js";
-import { setActivePluginRegistry } from "./runtime.js";
+import {
+  getActivePluginRegistry,
+  pinActivePluginChannelRegistry,
+  setActivePluginRegistry,
+} from "./runtime.js";
 import { ensurePluginRegistryLoaded } from "./runtime/runtime-registry-loader.js";
 
 function writeBeforeInstallBlocker(
@@ -452,6 +456,67 @@ describe("install hook provider activation", () => {
     );
 
     expect(result?.blocked?.reason).toBe("workspace B scanner");
+  });
+
+  it("uses the target active scanner instead of a same-id pinned scanner", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceA = makeTempDir();
+    const workspaceB = makeTempDir();
+    const scannerId = "pinned-workspace-scanner";
+    const scannerA = writeLabeledBeforeInstallBlocker(
+      scannerId,
+      path.join(workspaceA, ".openclaw", "extensions", scannerId),
+      "pinned workspace A scanner",
+    );
+    const scannerB = writeLabeledBeforeInstallBlocker(
+      scannerId,
+      path.join(workspaceB, ".openclaw", "extensions", scannerId),
+      "active workspace B scanner",
+    );
+    const config = {
+      plugins: {
+        allow: [scannerId],
+        entries: {
+          [scannerId]: { enabled: true },
+        },
+      },
+    };
+
+    const result = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () => {
+        ensurePluginRegistryLoaded({
+          config,
+          workspaceDir: workspaceA,
+          onlyPluginIds: [scannerA.id],
+        });
+        const workspaceARegistry = getActivePluginRegistry();
+        if (!workspaceARegistry) {
+          throw new Error("expected workspace A plugin registry");
+        }
+        pinActivePluginChannelRegistry(workspaceARegistry);
+        ensurePluginRegistryLoaded({
+          config,
+          workspaceDir: workspaceB,
+          onlyPluginIds: [scannerB.id],
+        });
+        return await evaluateSkillInstallPolicyRuntime({
+          config,
+          workspaceDir: workspaceB,
+          installId: "node",
+          logger: {},
+          origin: { type: "workspace" },
+          skillName: "payload",
+          sourceDir: makeTempDir(),
+        });
+      },
+    );
+
+    expect(result?.blocked?.reason).toBe("active workspace B scanner");
   });
 
   it("stops dispatching a hook provider after it is disabled", async () => {

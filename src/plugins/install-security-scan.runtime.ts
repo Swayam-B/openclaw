@@ -36,7 +36,7 @@ import type { InstallSafetyOverrides } from "./install-security-scan.types.js";
 import { readPersistedInstalledPluginIndexSync } from "./installed-plugin-index-store.js";
 import { normalizePluginPolicyId } from "./plugin-policy-id.js";
 import { loadPluginRegistrySnapshot } from "./plugin-registry-snapshot.js";
-import { getActivePluginRegistryWorkspaceDir } from "./runtime.js";
+import { getActivePluginRegistry, getActivePluginRegistryWorkspaceDir } from "./runtime.js";
 import { loadIsolatedPluginRegistry } from "./runtime/runtime-registry-loader.js";
 
 type InstallScanLogger = {
@@ -68,7 +68,17 @@ function resolveBeforeInstallHookRunner(params: {
   ) {
     return getGlobalHookRunner();
   }
-  const globalRegistry = getGlobalHookRunnerRegistry();
+  const activeRegistry = getActivePluginRegistry();
+  const activeRegistryWorkspaceDir = getActivePluginRegistryWorkspaceDir();
+  const activeRegistryMatchesTarget =
+    activeRegistry !== null &&
+    activeRegistryWorkspaceDir !== undefined &&
+    path.resolve(activeRegistryWorkspaceDir) === path.resolve(params.workspaceDir);
+  const globalRegistry = activeRegistryMatchesTarget
+    ? activeRegistry
+    : activeRegistry
+      ? null
+      : getGlobalHookRunnerRegistry();
   const loadedGlobalPluginIds = new Set(
     globalRegistry?.plugins
       .filter((plugin) => plugin.status === "loaded")
@@ -82,19 +92,11 @@ function resolveBeforeInstallHookRunner(params: {
       .filter((hook) => hook.events.includes("before_install"))
       .map((hook) => normalizePluginPolicyId(hook.pluginId)) ?? []),
   ]);
-  const activeRegistryWorkspaceDir = getActivePluginRegistryWorkspaceDir();
-  const canReuseActiveProviders =
-    activeRegistryWorkspaceDir !== undefined &&
-    path.resolve(activeRegistryWorkspaceDir) === path.resolve(params.workspaceDir);
   const hookProviderIdsToLoad = params.hookProviderIds.filter((pluginId) => {
     const normalizedId = normalizePluginPolicyId(pluginId);
     return (
       passesCurrentPolicy(normalizedId) &&
-      !(
-        canReuseActiveProviders &&
-        loadedGlobalPluginIds.has(normalizedId) &&
-        globalBeforeInstallProviderIds.has(normalizedId)
-      )
+      !(loadedGlobalPluginIds.has(normalizedId) && globalBeforeInstallProviderIds.has(normalizedId))
     );
   });
   const isolatedRegistry =
