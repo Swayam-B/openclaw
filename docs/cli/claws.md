@@ -134,12 +134,20 @@ workspace-relative targets:
     "files": [
       {
         "source": "workspace/reference/policy.md",
-        "path": "reference/policy.md"
+        "path": "reference/policy.md",
+        "role": "reference"
       }
     ]
   }
 }
 ```
+
+Schema version 2 workspace files may use the descriptive roles `reference`,
+`schema`, `template`, `example`, `fixture`, or `asset`. Roles appear in
+inspection and planning but do not load a file into every turn, grant tool
+access, or make content executable. Refer to required files from `CLAW.md`,
+`AGENTS.md`, or an installed skill. Omitting `role` preserves the ordinary
+supporting-file behavior.
 
 ### Personalization setup
 
@@ -204,7 +212,7 @@ plan returns field diagnostics, input and seed descriptors, rendered digests,
 and an answer-bound `planIntegrity` without returning answer values. Plugin and
 MCP credentials continue through their existing owner-specific setup paths.
 
-Skills and plugins use exact ClawHub versions:
+Schema version 1 skills and plugins use exact ClawHub versions:
 
 ```json
 {
@@ -224,6 +232,35 @@ Skills and plugins use exact ClawHub versions:
   ]
 }
 ```
+
+Schema version 2 keeps only portable Agent Skills in `packages`. OpenClaw,
+Claude, Codex, and Cursor plugin dependencies move to the package-local
+OpenClaw profile:
+
+```yaml
+schemaVersion: 2
+agent:
+  tools:
+    profile: coding
+extensions:
+  - id: audit-tools
+    kind: plugin
+    format: claude
+    source: clawhub
+    ref: "@acme/audit-plugin"
+    version: 2.0.0
+```
+
+`format` is an assertion checked by OpenClaw's canonical plugin detector. A
+mismatch or failed plugin preflight blocks the complete plan. Inspection and
+dry-run output report the detected format plus mapped and unavailable bundle
+components. Detect-only components remain unavailable exactly as they do for
+ordinary plugin installation; Claws do not reinterpret or execute them.
+
+This first schema and planning slice does not install profile extensions. A
+schema version 2 Claw that declares them remains preview-only until extension
+lifecycle support is available. Direct portable `mcpServers` declarations are
+unchanged and remain separate from MCP servers owned by a plugin bundle.
 
 The dry run uses the existing skill and plugin preflight paths to resolve the
 exact artifact, integrity, and any ClawHub trust warning before consent. The

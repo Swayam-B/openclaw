@@ -1,5 +1,6 @@
 import type { NpmIntegrityDrift, NpmSpecResolution } from "../infra/install-source-utils.js";
 import type { InstallPolicySource } from "../security/install-policy.js";
+import type { PluginInstallArtifactInspection } from "./install-artifact-inspection.js";
 import type { InstallSafetyOverrides } from "./install-security-scan.js";
 import type { PackageManifest as PluginPackageManifest } from "./manifest.js";
 
@@ -44,6 +45,7 @@ export type InstallPluginResult =
       manifestName?: string;
       version?: string;
       extensions: string[];
+      artifactInspection?: PluginInstallArtifactInspection;
       npmResolution?: NpmSpecResolution;
       integrityDrift?: NpmIntegrityDrift;
     }

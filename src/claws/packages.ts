@@ -15,13 +15,20 @@ import {
   type MaintainedClawPackageLifecycleLease,
 } from "../state/claw-package-lifecycle-lease.js";
 import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db.js";
+import { VERSION } from "../version.js";
 import {
   persistClawPackageRef,
   readClawPackageRefs,
   updateClawPackageRefStatus,
   type PersistedClawPackageRef,
 } from "./provenance.js";
-import type { ClawAddPlan, ClawAddPlanAction, ClawPackage, ResolvedClawPackage } from "./types.js";
+import type {
+  ClawAddPlan,
+  ClawAddPlanAction,
+  ClawPackage,
+  ClawPackagePreflightResult,
+  ResolvedClawPackage,
+} from "./types.js";
 
 export class ClawPackageInstallError extends Error {
   constructor(
@@ -115,24 +122,6 @@ function ownerInstallIsNewerThanRefs(
   );
 }
 
-type ClawPackagePreflightResult =
-  | {
-      ok: true;
-      action: "install" | "reuse";
-      integrity: string;
-      installId?: string;
-      warning?: string;
-    }
-  | {
-      ok: false;
-      code: string;
-      message: string;
-      installedVersion?: string;
-      integrity?: string;
-      installId?: string;
-      warning?: string;
-    };
-
 export async function preflightClawPackage(
   pkg: ClawPackage,
   workspaceDir: string,
@@ -165,6 +154,13 @@ export async function preflightClawPackage(
   });
   if (!probe.ok) {
     return { ok: false, code: probe.code ?? "plugin_preflight_failed", message: probe.error };
+  }
+  if (!probe.artifactInspection) {
+    return {
+      ok: false,
+      code: "plugin_artifact_inspection_unavailable",
+      message: `Plugin ${pkg.ref}@${pkg.version} did not return canonical artifact inspection.`,
+    };
   }
   const integrity = probe.clawhub.integrity
     ? normalizeClawHubSha256Integrity(probe.clawhub.integrity)
@@ -204,6 +200,10 @@ export async function preflightClawPackage(
     action: result.action,
     integrity,
     installId: probe.pluginId,
+    detectedFormat: probe.artifactInspection.format,
+    mapped: probe.artifactInspection.mapped,
+    unavailable: probe.artifactInspection.unavailable,
+    adapterIdentity: `openclaw/${VERSION}`,
     ...(probe.warning ? { warning: probe.warning } : {}),
   };
 }

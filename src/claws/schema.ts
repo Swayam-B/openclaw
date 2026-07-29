@@ -96,120 +96,160 @@ const agentSchema = z
   })
   .strict();
 
-const openClawProfileSchema = z
+const openClawAgentProfileSchema = z
   .object({
-    schemaVersion: z.literal(1),
-    agent: z
+    groupChat: z
+      .object({ mentionPatterns: z.array(nonEmptyString).min(1).optional() })
+      .strict()
+      .optional(),
+    sandbox: z
       .object({
-        groupChat: z
-          .object({ mentionPatterns: z.array(nonEmptyString).min(1).optional() })
+        mode: z.enum(["off", "non-main", "all"]).optional(),
+        scope: z.enum(["session", "agent", "shared"]).optional(),
+        workspaceAccess: z.enum(["none", "ro", "rw"]).optional(),
+      })
+      .strict()
+      .optional(),
+    tools: z
+      .object({
+        profile: nonEmptyString
+          .refine(
+            (value) => resolveToolProfilePolicy(value) !== undefined,
+            "Tool profile must name a registered OpenClaw built-in profile.",
+          )
+          .optional(),
+        allow: z.array(nonEmptyString).min(1).optional(),
+        alsoAllow: z.array(nonEmptyString).min(1).optional(),
+        deny: z.array(nonEmptyString).min(1).optional(),
+        fs: z
+          .object({ workspaceOnly: z.literal(true).optional() })
           .strict()
           .optional(),
-        sandbox: z
+      })
+      .strict()
+      .superRefine((tools, ctx) => {
+        if (tools.allow && tools.alsoAllow) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["alsoAllow"],
+            message:
+              "Agent tools cannot set both allow and alsoAllow; use allow alone or profile with alsoAllow.",
+          });
+        }
+      })
+      .optional(),
+    memory: z
+      .object({
+        search: z
           .object({
-            mode: z.enum(["off", "non-main", "all"]).optional(),
-            scope: z.enum(["session", "agent", "shared"]).optional(),
-            workspaceAccess: z.enum(["none", "ro", "rw"]).optional(),
+            enabled: z.boolean().optional(),
+            rememberAcrossConversations: z.boolean().optional(),
+            sources: z
+              .array(z.enum(["memory", "sessions"]))
+              .min(1)
+              .optional(),
           })
           .strict()
-          .optional(),
-        tools: z
-          .object({
-            profile: nonEmptyString
-              .refine(
-                (value) => resolveToolProfilePolicy(value) !== undefined,
-                "Tool profile must name a registered OpenClaw built-in profile.",
-              )
-              .optional(),
-            allow: z.array(nonEmptyString).min(1).optional(),
-            alsoAllow: z.array(nonEmptyString).min(1).optional(),
-            deny: z.array(nonEmptyString).min(1).optional(),
-            fs: z
-              .object({ workspaceOnly: z.literal(true).optional() })
-              .strict()
-              .optional(),
-          })
-          .strict()
-          .superRefine((tools, ctx) => {
-            if (tools.allow && tools.alsoAllow) {
+          .superRefine((search, ctx) => {
+            if (
+              search.sources?.includes("sessions") &&
+              search.rememberAcrossConversations !== true
+            ) {
               ctx.addIssue({
                 code: "custom",
-                path: ["alsoAllow"],
+                path: ["rememberAcrossConversations"],
                 message:
-                  "Agent tools cannot set both allow and alsoAllow; use allow alone or profile with alsoAllow.",
+                  "The sessions source requires rememberAcrossConversations: true in the OpenClaw profile.",
               });
             }
           })
           .optional(),
-        memory: z
-          .object({
-            search: z
-              .object({
-                enabled: z.boolean().optional(),
-                rememberAcrossConversations: z.boolean().optional(),
-                sources: z
-                  .array(z.enum(["memory", "sessions"]))
-                  .min(1)
-                  .optional(),
-              })
-              .strict()
-              .superRefine((search, ctx) => {
-                if (
-                  search.sources?.includes("sessions") &&
-                  search.rememberAcrossConversations !== true
-                ) {
-                  ctx.addIssue({
-                    code: "custom",
-                    path: ["rememberAcrossConversations"],
-                    message:
-                      "The sessions source requires rememberAcrossConversations: true in the OpenClaw profile.",
-                  });
-                }
-              })
-              .optional(),
-          })
-          .strict()
-          .optional(),
-        heartbeat: z
-          .object({
-            every: nonEmptyString
-              .refine((value) => {
-                try {
-                  parseDurationMs(value, { defaultUnit: "m" });
-                  return true;
-                } catch {
-                  return false;
-                }
-              }, "Invalid heartbeat duration.")
-              .optional(),
-            activeHours: z
-              .object({
-                start: nonEmptyString.regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).optional(),
-                end: nonEmptyString.regex(/^(?:(?:[01]\d|2[0-3]):[0-5]\d|24:00)$/).optional(),
-                timezone: nonEmptyString
-                  .refine(isValidClawTimezone, "Invalid IANA timezone.")
-                  .optional(),
-              })
-              .strict()
-              .optional(),
-            lightContext: z.boolean().optional(),
-            isolatedSession: z.boolean().optional(),
-            timeoutSeconds: z.number().int().positive().optional(),
-          })
-          .strict()
-          .optional(),
-        humanDelay: z
-          .object({
-            mode: z.enum(["off", "natural", "custom"]).optional(),
-            minMs: z.number().int().nonnegative().optional(),
-            maxMs: z.number().int().nonnegative().optional(),
-          })
-          .strict()
-          .optional(),
       })
-      .strict(),
+      .strict()
+      .optional(),
+    heartbeat: z
+      .object({
+        every: nonEmptyString
+          .refine((value) => {
+            try {
+              parseDurationMs(value, { defaultUnit: "m" });
+              return true;
+            } catch {
+              return false;
+            }
+          }, "Invalid heartbeat duration.")
+          .optional(),
+        activeHours: z
+          .object({
+            start: nonEmptyString.regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).optional(),
+            end: nonEmptyString.regex(/^(?:(?:[01]\d|2[0-3]):[0-5]\d|24:00)$/).optional(),
+            timezone: nonEmptyString
+              .refine(isValidClawTimezone, "Invalid IANA timezone.")
+              .optional(),
+          })
+          .strict()
+          .optional(),
+        lightContext: z.boolean().optional(),
+        isolatedSession: z.boolean().optional(),
+        timeoutSeconds: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
+    humanDelay: z
+      .object({
+        mode: z.enum(["off", "natural", "custom"]).optional(),
+        minMs: z.number().int().nonnegative().optional(),
+        maxMs: z.number().int().nonnegative().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
+
+const openClawExtensionSchema = z
+  .object({
+    id: agentId,
+    kind: z.literal("plugin"),
+    format: z.enum(["openclaw", "claude", "codex", "cursor"]),
+    source: z.literal("clawhub"),
+    ref: clawHubPackageName,
+    version: exactVersion,
+  })
+  .strict();
+
+const openClawProfileSchema = z.discriminatedUnion("schemaVersion", [
+  z.object({ schemaVersion: z.literal(1), agent: openClawAgentProfileSchema }).strict(),
+  z
+    .object({
+      schemaVersion: z.literal(2),
+      agent: openClawAgentProfileSchema,
+      extensions: z.array(openClawExtensionSchema).optional().default([]),
+    })
+    .strict()
+    .superRefine((profile, ctx) => {
+      const ids = new Set<string>();
+      const refs = new Set<string>();
+      profile.extensions.forEach((extension, index) => {
+        if (ids.has(extension.id)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["extensions", index, "id"],
+            message: `Extension id ${JSON.stringify(extension.id)} is declared more than once.`,
+          });
+        }
+        ids.add(extension.id);
+        const ref = extension.ref.toLowerCase();
+        if (refs.has(ref)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["extensions", index, "ref"],
+            message: `Extension ${JSON.stringify(extension.ref)} is declared more than once.`,
+          });
+        }
+        refs.add(ref);
+      });
+    }),
+]);
 
 const workspaceSourceSchema = z.object({ source: packageRelativePath }).strict();
 // Root BOOTSTRAP.md is local state, not a portable managed bootstrap key.
@@ -225,17 +265,26 @@ const bootstrapFilesSchema = z
   .partial()
   .strict();
 
-const workspaceFileSchema = z
+const workspaceFileV1Schema = z
   .object({ source: packageRelativePath, path: packageRelativePath })
   .strict();
 
-const workspaceSchema = z
+const workspaceFileV2Schema = z
   .object({
-    bootstrapFiles: bootstrapFilesSchema.optional().default({}),
-    files: z.array(workspaceFileSchema).optional().default([]),
+    source: packageRelativePath,
+    path: packageRelativePath,
+    role: z.enum(["reference", "schema", "template", "example", "fixture", "asset"]).optional(),
   })
-  .strict()
-  .default({ bootstrapFiles: {}, files: [] });
+  .strict();
+
+const workspaceSchema = (fileSchema: typeof workspaceFileV1Schema | typeof workspaceFileV2Schema) =>
+  z
+    .object({
+      bootstrapFiles: bootstrapFilesSchema.optional().default({}),
+      files: z.array(fileSchema).optional().default([]),
+    })
+    .strict()
+    .default({ bootstrapFiles: {}, files: [] });
 
 const packageSchema = z
   .object({
@@ -399,8 +448,6 @@ const cronJobSchema = z
 const manifestCommonShape = {
   agent: agentSchema,
   metadata: z.record(nonEmptyString, z.string()).optional().default({}),
-  workspace: workspaceSchema.optional().default({ bootstrapFiles: {}, files: [] }),
-  packages: z.array(packageSchema).optional().default([]),
   mcpServers: z
     .record(
       nonEmptyString.regex(/^[a-z][a-z0-9_-]{0,63}$/, "Invalid MCP server name."),
@@ -412,12 +459,22 @@ const manifestCommonShape = {
 };
 
 const manifestV1Schema = z
-  .object({ schemaVersion: z.literal(CLAW_SCHEMA_VERSION), ...manifestCommonShape })
+  .object({
+    schemaVersion: z.literal(CLAW_SCHEMA_VERSION),
+    ...manifestCommonShape,
+    workspace: workspaceSchema(workspaceFileV1Schema),
+    packages: z.array(packageSchema).optional().default([]),
+  })
   .strict();
 const manifestV2Schema = z
   .object({
     schemaVersion: z.literal(CLAW_SETUP_SCHEMA_VERSION),
     ...manifestCommonShape,
+    workspace: workspaceSchema(workspaceFileV2Schema),
+    packages: z
+      .array(packageSchema.extend({ kind: z.literal("skill") }))
+      .optional()
+      .default([]),
     setup: clawSetupSchema.optional().default({ inputs: [] }),
     personalization: clawPersonalizationSchema.optional().default({ seeds: [] }),
   })

@@ -30,51 +30,70 @@ type ClawAgent = {
   };
 };
 
-export type ClawOpenClawProfile = {
-  schemaVersion: 1;
-  agent: {
-    groupChat?: {
-      mentionPatterns?: string[];
-    };
-    sandbox?: {
-      mode?: "off" | "non-main" | "all";
-      scope?: "session" | "agent" | "shared";
-      workspaceAccess?: "none" | "ro" | "rw";
-    };
-    tools?: {
-      profile?: ToolProfileId;
-      allow?: string[];
-      alsoAllow?: string[];
-      deny?: string[];
-      fs?: {
-        workspaceOnly?: true;
-      };
-    };
-    memory?: {
-      search?: {
-        enabled?: boolean;
-        rememberAcrossConversations?: boolean;
-        sources?: Array<"memory" | "sessions">;
-      };
-    };
-    heartbeat?: {
-      every?: string;
-      activeHours?: {
-        start?: string;
-        end?: string;
-        timezone?: string;
-      };
-      lightContext?: boolean;
-      isolatedSession?: boolean;
-      timeoutSeconds?: number;
-    };
-    humanDelay?: {
-      mode?: "off" | "natural" | "custom";
-      minMs?: number;
-      maxMs?: number;
+type ClawOpenClawAgentProfile = {
+  groupChat?: {
+    mentionPatterns?: string[];
+  };
+  sandbox?: {
+    mode?: "off" | "non-main" | "all";
+    scope?: "session" | "agent" | "shared";
+    workspaceAccess?: "none" | "ro" | "rw";
+  };
+  tools?: {
+    profile?: ToolProfileId;
+    allow?: string[];
+    alsoAllow?: string[];
+    deny?: string[];
+    fs?: {
+      workspaceOnly?: true;
     };
   };
+  memory?: {
+    search?: {
+      enabled?: boolean;
+      rememberAcrossConversations?: boolean;
+      sources?: Array<"memory" | "sessions">;
+    };
+  };
+  heartbeat?: {
+    every?: string;
+    activeHours?: {
+      start?: string;
+      end?: string;
+      timezone?: string;
+    };
+    lightContext?: boolean;
+    isolatedSession?: boolean;
+    timeoutSeconds?: number;
+  };
+  humanDelay?: {
+    mode?: "off" | "natural" | "custom";
+    minMs?: number;
+    maxMs?: number;
+  };
 };
+
+export type ClawExtensionFormat = "openclaw" | "claude" | "codex" | "cursor";
+
+export type ClawOpenClawExtension = {
+  id: string;
+  kind: "plugin";
+  format: ClawExtensionFormat;
+  source: "clawhub";
+  ref: string;
+  version: string;
+};
+
+export type ClawOpenClawProfile =
+  | {
+      schemaVersion: 1;
+      agent: ClawOpenClawAgentProfile;
+    }
+  | {
+      schemaVersion: 2;
+      agent: ClawOpenClawAgentProfile;
+      extensions: ClawOpenClawExtension[];
+    };
 
 export const CLAW_BOOTSTRAP_FILE_NAMES = [
   "AGENTS.md",
@@ -86,9 +105,18 @@ export const CLAW_BOOTSTRAP_FILE_NAMES = [
 
 type ClawBootstrapFileName = (typeof CLAW_BOOTSTRAP_FILE_NAMES)[number];
 
+export type ClawWorkspaceFileRole =
+  | "reference"
+  | "schema"
+  | "template"
+  | "example"
+  | "fixture"
+  | "asset";
+
 type ClawWorkspaceFile = {
   source: string;
   path: string;
+  role?: ClawWorkspaceFileRole;
 };
 
 type ClawWorkspace = {
@@ -171,6 +199,26 @@ export type ClawPackage = {
 
 export type ResolvedClawPackage = ClawPackage & { integrity: string };
 
+export type ClawPackagePreflightResult = {
+  ok: boolean;
+  action?: "install" | "reuse";
+  integrity?: string;
+  installId?: string;
+  warning?: string;
+  installedVersion?: string;
+  code?: string;
+  message?: string;
+  detectedFormat?: ClawExtensionFormat;
+  mapped?: string[];
+  unavailable?: string[];
+  adapterIdentity?: string;
+};
+
+export type ClawPackagePreflight = (
+  pkg: ClawPackage,
+  workspace: string,
+) => Promise<ClawPackagePreflightResult>;
+
 type ClawMcpServerCommon = {
   toolFilter?: {
     include?: string[];
@@ -223,8 +271,9 @@ export type ClawManifestV1 = ClawManifestBase & {
   schemaVersion: typeof CLAW_SCHEMA_VERSION;
 };
 
-export type ClawManifestV2 = ClawManifestBase & {
+export type ClawManifestV2 = Omit<ClawManifestBase, "packages"> & {
   schemaVersion: typeof CLAW_SETUP_SCHEMA_VERSION;
+  packages: Array<ClawPackage & { kind: "skill" }>;
   setup: { inputs: ClawSetupInput[] };
   personalization: { seeds: ClawPersonalizationSeed[] };
 };
@@ -305,6 +354,17 @@ export type ClawSetupPlan = {
   diagnostics: ClawDiagnostic[];
 };
 
+export type ClawExtensionPlan = ClawOpenClawExtension & {
+  detectedFormat?: ClawExtensionFormat;
+  integrity?: string;
+  installId?: string;
+  ownerAction?: "install" | "reuse";
+  mapped: string[];
+  unavailable: string[];
+  adapterIdentity?: string;
+  blocked: boolean;
+};
+
 export type ClawAddCapabilityChange = {
   kind: "agent" | "package" | "mcpServer" | "cronJob";
   id: string;
@@ -351,6 +411,7 @@ export type ClawAddPlan = {
     ready: boolean;
     requirements: ClawLocalPrerequisite[];
   };
+  extensions: ClawExtensionPlan[];
   setup?: ClawSetupPlan;
   blockers: ClawDiagnostic[];
   diagnostics: ClawDiagnostic[];

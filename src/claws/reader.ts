@@ -14,13 +14,15 @@ import {
   MAX_MANAGED_FILE_BYTES,
   MAX_MANAGED_WORKSPACE_BYTES,
 } from "./source-limits.js";
-import type {
-  ClawDiagnostic,
-  ClawManifest,
-  ClawReadResult,
-  ClawSourceIdentity,
-  ClawSetupTemplateSnapshot,
-  ClawWorkspaceSourceSnapshot,
+import {
+  CLAW_SCHEMA_VERSION,
+  CLAW_SETUP_SCHEMA_VERSION,
+  type ClawDiagnostic,
+  type ClawManifest,
+  type ClawReadResult,
+  type ClawSourceIdentity,
+  type ClawSetupTemplateSnapshot,
+  type ClawWorkspaceSourceSnapshot,
 } from "./types.js";
 
 type PackageJson = {
@@ -583,6 +585,21 @@ export async function readClawManifestFile(path: string): Promise<ClawReadResult
   });
   if (!profile.ok) {
     return profile;
+  }
+  if (
+    parsed.manifest.schemaVersion === CLAW_SCHEMA_VERSION &&
+    profile.profile?.schemaVersion === CLAW_SETUP_SCHEMA_VERSION
+  ) {
+    return {
+      ok: false,
+      diagnostics: [
+        fileDiagnostic(
+          "openclaw_profile_version_mismatch",
+          "OpenClaw profile schema version 2 requires Claw schema version 2.",
+          "$.metadata.openclaw.config.schemaVersion",
+        ),
+      ],
+    };
   }
   const setupTemplates = await readClawSetupTemplates({
     packageRoot: sourceResult.source.packageRoot,
