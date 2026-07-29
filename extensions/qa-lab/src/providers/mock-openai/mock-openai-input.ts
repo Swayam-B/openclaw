@@ -41,7 +41,7 @@ function isInternalRuntimeContextCarrierText(text: string) {
   );
 }
 
-function isToolOutputContinuationText(text: string) {
+export function isContinuationUserText(text: string) {
   const trimmed = text.trim();
   if (!trimmed) {
     return false;
@@ -152,7 +152,7 @@ export function extractToolOutput(input: ResponsesInputItem[]) {
         .filter(Boolean);
       if (
         laterUserTexts.length > 0 &&
-        laterUserTexts.every((text) => isToolOutputContinuationText(text))
+        laterUserTexts.every((text) => isContinuationUserText(text))
       ) {
         return output;
       }
@@ -180,7 +180,7 @@ export function extractToolOutputStructuredError(input: ResponsesInputItem[]) {
         .filter(Boolean);
       if (
         laterUserTexts.length > 0 &&
-        laterUserTexts.every((text) => isToolOutputContinuationText(text))
+        laterUserTexts.every((text) => isContinuationUserText(text))
       ) {
         return functionCallOutputIsStructuredError(candidateItem);
       }
@@ -207,7 +207,7 @@ export function extractToolOutputCallId(input: ResponsesInputItem[]) {
         .filter(Boolean);
       if (
         laterUserTexts.length > 0 &&
-        laterUserTexts.every((text) => isToolOutputContinuationText(text))
+        laterUserTexts.every((text) => isContinuationUserText(text))
       ) {
         return extractFunctionCallOutputCallId(candidateItem);
       }

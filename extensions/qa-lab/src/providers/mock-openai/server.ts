@@ -129,6 +129,7 @@ import {
   extractAllUserTexts,
   extractAllInputTexts,
   extractInstructionsText,
+  isContinuationUserText,
   extractAllRequestTexts,
   buildWhatsAppPendingHistoryReply,
   buildWhatsAppBroadcastReply,
@@ -159,7 +160,16 @@ const QA_STREAMING_TOOL_PROGRESS_FAMILY_PROMPT_RE =
   /(?:partial|quiet) streaming qa check|final-only marker streaming qa check|block streaming qa check|tool progress(?: error)? qa check/i;
 
 function extractLatestScenarioFamilyPrompt(texts: string[]) {
-  const envelope = extractLastMatchingUserText(texts, QA_STREAMING_TOOL_PROGRESS_FAMILY_PROMPT_RE);
+  let envelope = "";
+  for (const text of texts.toReversed()) {
+    if (QA_STREAMING_TOOL_PROGRESS_FAMILY_PROMPT_RE.test(text)) {
+      envelope = text;
+      break;
+    }
+    if (!isContinuationUserText(text)) {
+      return "";
+    }
+  }
   if (!envelope) {
     return "";
   }
