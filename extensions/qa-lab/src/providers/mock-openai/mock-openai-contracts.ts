@@ -79,7 +79,7 @@ export type StreamEvent =
  * classified as `"openai"`. That matches the parity program's convention
  * where the provider label is the source of truth, not the HTTP route.
  */
-type MockOpenAiProviderVariant = "openai" | "anthropic" | "unknown";
+export type MockOpenAiProviderVariant = "openai" | "anthropic" | "unknown";
 
 export function resolveProviderVariant(model: string | undefined): MockOpenAiProviderVariant {
   if (typeof model !== "string") {
@@ -108,6 +108,18 @@ export function resolveProviderVariant(model: string | undefined): MockOpenAiPro
     return "anthropic";
   }
   return "unknown";
+}
+
+export function normalizeMockOwnershipCallId(
+  callId: string,
+  providerVariant: MockOpenAiProviderVariant,
+) {
+  if (providerVariant !== "anthropic") {
+    return callId;
+  }
+  // Anthropic replay uses strict alphanumeric IDs capped at 40 characters.
+  // Mirror that boundary so the returned result still resolves its registered owner.
+  return callId.replace(/[^a-zA-Z0-9]/gu, "").slice(0, 40) || callId;
 }
 
 export type MockOpenAiRequestSnapshot = {

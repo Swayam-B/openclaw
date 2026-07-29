@@ -1,6 +1,7 @@
 // Qa Lab tests cover server plugin behavior.
 import { afterEach, describe, expect, it } from "vitest";
 import { readQaMockRequestCursor } from "../shared/debug-request-cursor.js";
+import { normalizeMockOwnershipCallId } from "./mock-openai-contracts.js";
 import { hasSuccessfulSessionsSpawnToolResult } from "./mock-openai-spawn-result.js";
 import { readTargetFromPrompt } from "./mock-openai-tooling.js";
 import { startQaMockOpenAiServer } from "./server.js";
@@ -304,6 +305,17 @@ function explicitSessionsSpawnPrompt(token: string) {
 }
 
 describe("qa mock openai server", () => {
+  it("keeps normalized Anthropic ownership ids distinct across generated calls", () => {
+    const first = normalizeMockOwnershipCallId("call_mock_exec_19e7b63020_2", "anthropic");
+    const second = normalizeMockOwnershipCallId("call_mock_exec_19e7b63020_3", "anthropic");
+
+    expect(first).toBe("callmockexec19e7b630202");
+    expect(second).not.toBe(first);
+    expect(normalizeMockOwnershipCallId("call_mock_exec_19e7b63020_2", "openai")).toBe(
+      "call_mock_exec_19e7b63020_2",
+    );
+  });
+
   it("accepts a code-mode spawn after a later completed wait poll", () => {
     const spawnArgs = {
       task: "Fanout worker alpha",
@@ -5701,19 +5713,27 @@ describe("qa mock openai server", () => {
         ],
       },
     ];
+    const replayToolUse = (toolUse: Record<string, unknown>) => ({
+      ...toolUse,
+      id: String(toolUse.id).replace(/[^a-zA-Z0-9]/gu, ""),
+    });
 
     const alpha = requireExecSpawn(await send(baseMessages), "qa-fanout-alpha");
     const alphaRetry = requireExecSpawn(
-      await send(appendResult(baseMessages, alpha, "spawn failed", true)),
+      await send(appendResult(baseMessages, replayToolUse(alpha), "spawn failed", true)),
       "qa-fanout-alpha",
     );
     const afterAlpha = appendResult(
       baseMessages,
-      alphaRetry,
+      replayToolUse(alphaRetry),
       completedSpawn("agent:qa:subagent:alpha"),
     );
     const beta = requireExecSpawn(await send(afterAlpha), "qa-fanout-beta");
-    const betaCompletion = appendResult(afterAlpha, beta, completedSpawn("agent:qa:subagent:beta"));
+    const betaCompletion = appendResult(
+      afterAlpha,
+      replayToolUse(beta),
+      completedSpawn("agent:qa:subagent:beta"),
+    );
     const final = await send(betaCompletion);
     expect(final.stop_reason).toBe("end_turn");
     expect(final.content.find((block) => block.type === "text")?.text).toBe(

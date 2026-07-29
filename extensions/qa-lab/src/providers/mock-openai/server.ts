@@ -70,6 +70,7 @@ import {
   QA_MCP_CODE_MODE_API_FILE_PROMPT_RE,
   type MockScenarioState,
   buildMockScenarioStateCallKey,
+  normalizeMockOwnershipCallId,
   resolveMockScenarioStateNamespace,
   resolveSubagentFanoutPhaseNamespace,
   sourceDiscoveryReadPathForProvider,
@@ -1247,15 +1248,16 @@ async function buildResponsesPayload(
   const requestFanoutNamespace = resolveSubagentFanoutPhaseNamespace(allInputText);
   const fanoutResultCallId =
     findSuccessfulSessionsSpawnToolResultCallId(input, "qa-fanout-beta") ?? "";
+  const ownedFanoutResultCallId = normalizeMockOwnershipCallId(fanoutResultCallId, providerVariant);
   const registeredFanoutNamespace = fanoutResultCallId
     ? scenarioState.subagentFanoutNamespaceByCallId.get(
-        buildMockScenarioStateCallKey(requestFanoutNamespace, fanoutResultCallId),
+        buildMockScenarioStateCallKey(requestFanoutNamespace, ownedFanoutResultCallId),
       )
     : undefined;
   const successfulBetaSpawn = registeredFanoutNamespace === requestFanoutNamespace;
   const consumedFanoutResultKey = buildMockScenarioStateCallKey(
     requestFanoutNamespace,
-    fanoutResultCallId,
+    ownedFanoutResultCallId,
   );
   if (
     successfulBetaSpawn &&
@@ -1289,8 +1291,9 @@ async function buildResponsesPayload(
         });
     const callId = extractPlannedToolCallId(events);
     if (callId) {
+      const ownedCallId = normalizeMockOwnershipCallId(callId, providerVariant);
       scenarioState.subagentFanoutNamespaceByCallId.set(
-        buildMockScenarioStateCallKey(requestFanoutNamespace, callId),
+        buildMockScenarioStateCallKey(requestFanoutNamespace, ownedCallId),
         requestFanoutNamespace,
       );
     }
