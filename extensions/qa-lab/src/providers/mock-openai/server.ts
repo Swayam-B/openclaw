@@ -157,6 +157,23 @@ import {
 
 const QA_STREAMING_TOOL_PROGRESS_FAMILY_PROMPT_RE =
   /(?:partial|quiet) streaming qa check|final-only marker streaming qa check|block streaming qa check|tool progress(?: error)? qa check/i;
+
+function extractLatestScenarioFamilyPrompt(texts: string[]) {
+  const envelope = extractLastMatchingUserText(texts, QA_STREAMING_TOOL_PROGRESS_FAMILY_PROMPT_RE);
+  if (!envelope) {
+    return "";
+  }
+  const pattern = new RegExp(
+    QA_STREAMING_TOOL_PROGRESS_FAMILY_PROMPT_RE.source,
+    `${QA_STREAMING_TOOL_PROGRESS_FAMILY_PROMPT_RE.flags}g`,
+  );
+  let latestIndex = -1;
+  for (const match of envelope.matchAll(pattern)) {
+    latestIndex = match.index;
+  }
+  return latestIndex < 0 ? "" : envelope.slice(latestIndex);
+}
+
 async function buildResponsesPayload(
   body: Record<string, unknown>,
   scenarioState: MockScenarioState,
@@ -184,12 +201,12 @@ async function buildResponsesPayload(
   const promptExactMarkerDirective = extractExactMarkerDirective(prompt);
   const allUserTexts = extractAllUserTexts(input);
   const allUserText = allUserTexts.join("\n");
-  const scenarioFamilyPrompt =
-    extractLastMatchingUserText(allUserTexts, QA_STREAMING_TOOL_PROGRESS_FAMILY_PROMPT_RE) ||
-    prompt;
+  const scenarioFamilyPrompt = extractLatestScenarioFamilyPrompt(allUserTexts) || prompt;
   const scenarioFamilyReplyDirective =
     extractExactReplyDirective(scenarioFamilyPrompt) ??
-    extractExactMarkerDirective(scenarioFamilyPrompt);
+    extractExactMarkerDirective(scenarioFamilyPrompt) ??
+    extractExactReplyDirective(scenarioToolOutput) ??
+    extractExactMarkerDirective(scenarioToolOutput);
   const userExactReplyDirective =
     promptExactReplyDirective ?? extractExactReplyDirective(allUserText);
   const userExactMarkerDirective =
@@ -646,24 +663,27 @@ async function buildResponsesPayload(
     ]);
   }
   const toolProgressReplyDirective = scenarioFamilyReplyDirective;
-  if (QA_TOOL_PROGRESS_ERROR_PROMPT_RE.test(scenarioFamilyPrompt) && toolProgressReplyDirective) {
+  if (QA_TOOL_PROGRESS_ERROR_PROMPT_RE.test(scenarioFamilyPrompt)) {
     if (!toolOutput) {
       return buildToolProgressReadEvents(QA_TOOL_PROGRESS_ERROR_PROMPT_RE);
     }
-    return buildAssistantEvents(
-      hasToolErrorOutput(toolJson, toolOutput)
-        ? toolProgressReplyDirective
-        : "BUG-TOOL-DID-NOT-FAIL",
-    );
+    if (!hasToolErrorOutput(toolJson, toolOutput)) {
+      return buildAssistantEvents("BUG-TOOL-DID-NOT-FAIL");
+    }
+    if (toolProgressReplyDirective) {
+      return buildAssistantEvents(toolProgressReplyDirective);
+    }
   }
-  if (QA_TOOL_PROGRESS_PROMPT_RE.test(scenarioFamilyPrompt) && toolProgressReplyDirective) {
+  if (QA_TOOL_PROGRESS_PROMPT_RE.test(scenarioFamilyPrompt)) {
     if (!toolOutput) {
       return (
         buildToolProgressExecEvents(QA_TOOL_PROGRESS_PROMPT_RE) ??
         buildToolProgressReadEvents(QA_TOOL_PROGRESS_PROMPT_RE)
       );
     }
-    return buildAssistantEvents(toolProgressReplyDirective);
+    if (toolProgressReplyDirective) {
+      return buildAssistantEvents(toolProgressReplyDirective);
+    }
   }
   if (QA_BLOCK_STREAMING_PROMPT_RE.test(scenarioFamilyPrompt) && blockStreamingMarkers) {
     if (!toolOutput) {
