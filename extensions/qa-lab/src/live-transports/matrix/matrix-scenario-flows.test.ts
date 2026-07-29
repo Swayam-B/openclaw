@@ -131,6 +131,20 @@ describe("Matrix QA Lab scenario flows", () => {
     });
   });
 
+  it("isolates scenarios that assert fresh thread and DM session routing", () => {
+    const expectedReasons = {
+      "dm-shared-session": "pristine per-user DM session routing",
+      "thread-isolation": "fresh session boundary",
+      "thread-reply-override": "must not inherit an existing room session",
+    } as const;
+
+    for (const [scenarioId, reason] of Object.entries(expectedReasons)) {
+      const execution = requireFlowScenario(readQaScenarioById(scenarioId)).execution;
+      expect(execution.suiteIsolation, scenarioId).toBe("isolated");
+      expect(execution.isolationReason, scenarioId).toContain(reason);
+    }
+  });
+
   it("isolates the homeserver restart from the shared Matrix sync streams", () => {
     expect(readQaScenarioById("matrix-homeserver-restart-resume").execution).toMatchObject({
       kind: "flow",
