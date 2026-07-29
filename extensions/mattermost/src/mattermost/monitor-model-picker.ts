@@ -15,10 +15,7 @@ import {
 } from "./monitor-context.js";
 import { buildMattermostEventPlan, type MattermostEventPlan } from "./monitor-event-plan.js";
 import type { MattermostMonitorContext } from "./monitor-types.js";
-import {
-  deliverMattermostReplyPayload,
-  toMattermostChannelDeliveryResult,
-} from "./reply-delivery.js";
+import { deliverMattermostReplyPayload } from "./reply-delivery.js";
 import type { ReplyPayload } from "./runtime-api.js";
 import { buildModelsProviderData } from "./runtime-api.js";
 import { sendMessageMattermost } from "./send.js";
@@ -82,32 +79,31 @@ export function createMattermostModelPickerInteractionHandler(
       },
       ctxPayload,
       delivery: {
+        observeMessageSent: true,
         // Picker-triggered confirmations should stay immediate.
         deliver: async (payload: ReplyPayload) => {
           const trimmedPayload = {
             ...payload,
             text: core.channel.text.convertMarkdownTables(payload.text ?? "", tableMode).trim(),
           };
-          return toMattermostChannelDeliveryResult(
-            await deliverMattermostReplyPayload({
-              core,
-              cfg,
-              payload: trimmedPayload,
-              to,
-              accountId: account.accountId,
-              agentId: route.agentId,
-              replyToId: resolveMattermostReplyRootId({
-                kind,
-                threadRootId: thread.effectiveReplyToId,
-                replyToId: trimmedPayload.replyToId,
-              }),
-              textLimit,
-              // The picker path already converts and trims text before delivery.
-              tableMode: "off",
-              sendMessage: sendMessageMattermost,
-              onDmChannelResolution: deliveryBarrier.trackDmChannelResolution,
+          return await deliverMattermostReplyPayload({
+            core,
+            cfg,
+            payload: trimmedPayload,
+            to,
+            accountId: account.accountId,
+            agentId: route.agentId,
+            replyToId: resolveMattermostReplyRootId({
+              kind,
+              threadRootId: thread.effectiveReplyToId,
+              replyToId: trimmedPayload.replyToId,
             }),
-          );
+            textLimit,
+            // The picker path already converts and trims text before delivery.
+            tableMode: "off",
+            sendMessage: sendMessageMattermost,
+            onDmChannelResolution: deliveryBarrier.trackDmChannelResolution,
+          });
         },
         onError: (err, info) => {
           runtime.error?.(`mattermost model picker ${info.kind} reply failed: ${String(err)}`);

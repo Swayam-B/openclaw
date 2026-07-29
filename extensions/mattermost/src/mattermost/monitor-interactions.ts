@@ -6,10 +6,7 @@ import { resolveMattermostReplyRootId } from "./monitor-context.js";
 import { buildMattermostEventPlan } from "./monitor-event-plan.js";
 import type { MattermostModelPickerInteractionHandler } from "./monitor-model-picker.js";
 import type { MattermostMonitorContext } from "./monitor-types.js";
-import {
-  deliverMattermostReplyPayload,
-  toMattermostChannelDeliveryResult,
-} from "./reply-delivery.js";
+import { deliverMattermostReplyPayload } from "./reply-delivery.js";
 import type { ReplyPayload } from "./runtime-api.js";
 import { registerPluginHttpRoute } from "./runtime-api.js";
 import { sendMessageMattermost } from "./send.js";
@@ -117,26 +114,25 @@ export function registerMattermostInteractions(params: {
           },
           ctxPayload,
           delivery: {
+            observeMessageSent: true,
             deliver: async (payload: ReplyPayload) => {
-              const result = toMattermostChannelDeliveryResult(
-                await deliverMattermostReplyPayload({
-                  core,
-                  cfg,
-                  payload,
-                  to,
-                  accountId: account.accountId,
-                  agentId: route.agentId,
-                  replyToId: resolveMattermostReplyRootId({
-                    kind,
-                    threadRootId: thread.effectiveReplyToId,
-                    replyToId: payload.replyToId,
-                  }),
-                  textLimit,
-                  tableMode,
-                  sendMessage: sendMessageMattermost,
-                  onDmChannelResolution: deliveryBarrier.trackDmChannelResolution,
+              const result = await deliverMattermostReplyPayload({
+                core,
+                cfg,
+                payload,
+                to,
+                accountId: account.accountId,
+                agentId: route.agentId,
+                replyToId: resolveMattermostReplyRootId({
+                  kind,
+                  threadRootId: thread.effectiveReplyToId,
+                  replyToId: payload.replyToId,
                 }),
-              );
+                textLimit,
+                tableMode,
+                sendMessage: sendMessageMattermost,
+                onDmChannelResolution: deliveryBarrier.trackDmChannelResolution,
+              });
               if (result.visibleReplySent) {
                 runtime.log?.(`delivered button-click reply to ${to}`);
               }

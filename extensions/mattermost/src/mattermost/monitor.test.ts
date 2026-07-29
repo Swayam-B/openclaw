@@ -1,4 +1,9 @@
 // Mattermost tests cover monitor plugin behavior.
+import {
+  createChannelPartialDeliveryError,
+  isChannelPartialDeliveryError,
+} from "openclaw/plugin-sdk/channel-inbound";
+import { createMessageReceiptFromOutboundResults } from "openclaw/plugin-sdk/channel-outbound";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../runtime-api.js";
 import { resolveMattermostAccount } from "./accounts.js";
@@ -52,6 +57,19 @@ function createDraftStreamMock(postId: string | undefined = "preview-post-1") {
     discardPending: vi.fn(async () => {}),
     seal: vi.fn(async () => {}),
   };
+}
+
+function createDeliverFinalMock() {
+  return vi.fn(async (payload: { text?: string }) => ({
+    outcome: "text" as const,
+    messageIds: ["delivered-post-1"],
+    receipt: createMessageReceiptFromOutboundResults({
+      results: [{ channel: "mattermost", messageId: "delivered-post-1" }],
+      kind: "text",
+    }),
+    visibleReplySent: true,
+    content: payload.text ?? "",
+  }));
 }
 
 beforeEach(() => {
@@ -294,7 +312,7 @@ describe("shouldSuppressMattermostDefaultToolProgressMessages", () => {
 describe("deliverMattermostReplyWithDraftPreview", () => {
   it("suppresses reasoning-prefixed finals before preview finalization", async () => {
     const draftStream = createDraftStreamMock();
-    const deliverFinal = vi.fn(async () => {});
+    const deliverFinal = createDeliverFinalMock();
     const recordThreadParticipation = vi.fn();
 
     await deliverMattermostReplyWithDraftPreview({
@@ -322,10 +340,10 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
 
   it("records thread participation when a same-thread final finalizes the preview in place", async () => {
     const draftStream = createDraftStreamMock();
-    const deliverFinal = vi.fn(async () => {});
+    const deliverFinal = createDeliverFinalMock();
     const recordThreadParticipation = vi.fn();
 
-    await deliverMattermostReplyWithDraftPreview({
+    const result = await deliverMattermostReplyWithDraftPreview({
       payload: { text: "All good" } as never,
       info: { kind: "final" },
       kind: "channel",
@@ -346,11 +364,17 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
     });
     expect(deliverFinal).not.toHaveBeenCalled();
     expect(recordThreadParticipation).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      outcome: "text",
+      messageIds: ["patched"],
+      visibleReplySent: true,
+      content: "All good",
+    });
   });
 
   it("keeps a finalized preview when a later tool warning is delivered", async () => {
     const draftStream = createDraftStreamMock();
-    const deliverFinal = vi.fn(async () => {});
+    const deliverFinal = createDeliverFinalMock();
     const previewState = { finalizedViaPreviewPost: false };
     const params = {
       kind: "direct" as const,
@@ -384,7 +408,7 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
 
   it("deletes the preview after a successful normal final send", async () => {
     const draftStream = createDraftStreamMock();
-    const deliverFinal = vi.fn(async () => {});
+    const deliverFinal = createDeliverFinalMock();
 
     await deliverMattermostReplyWithDraftPreview({
       payload: { text: "All good", replyToId: "reply-1" } as never,
@@ -407,7 +431,7 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
 
   it("deletes the preview after a successful non-finalizable media final", async () => {
     const draftStream = createDraftStreamMock();
-    const deliverFinal = vi.fn(async () => {});
+    const deliverFinal = createDeliverFinalMock();
 
     await deliverMattermostReplyWithDraftPreview({
       payload: {
@@ -434,7 +458,7 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
 
   it("keeps the preview and sends media-only for TTS supplement finals", async () => {
     const draftStream = createDraftStreamMock();
-    const deliverFinal = vi.fn(async () => {});
+    const deliverFinal = createDeliverFinalMock();
 
     await deliverMattermostReplyWithDraftPreview({
       payload: {
@@ -467,9 +491,58 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
     });
   });
 
+  it("preserves the finalized preview receipt when its supplement fails after sending", async () => {
+    const draftStream = createDraftStreamMock();
+    const mediaReceipt = createMessageReceiptFromOutboundResults({
+      results: [{ channel: "mattermost", messageId: "media-post-1" }],
+      kind: "media",
+    });
+    const deliverFinal = vi.fn(async () => {
+      throw createChannelPartialDeliveryError(new Error("supplement bookkeeping failed"), {
+        messageIds: ["media-post-1"],
+        receipt: mediaReceipt,
+        visibleReplySent: true,
+        content: "",
+      });
+    });
+
+    let caught: unknown;
+    try {
+      await deliverMattermostReplyWithDraftPreview({
+        payload: {
+          mediaUrl: "https://example.com/tts.mp3",
+          audioAsVoice: true,
+          spokenText: "Spoken answer",
+          ttsSupplement: { spokenText: "Spoken answer" },
+        } as never,
+        info: { kind: "final" },
+        kind: "channel",
+        client: createMattermostClientMock(),
+        draftStream,
+        effectiveReplyToId: "thread-root-1",
+        resolvePreviewFinalText: (text) => text?.trim(),
+        previewState: { finalizedViaPreviewPost: false },
+        logVerboseMessage: vi.fn(),
+        deliverPayload: deliverFinal,
+      });
+    } catch (error: unknown) {
+      caught = error;
+    }
+
+    expect(isChannelPartialDeliveryError(caught)).toBe(true);
+    if (!isChannelPartialDeliveryError(caught)) {
+      throw new Error("expected a partial Mattermost preview delivery error");
+    }
+    expect(caught.deliveryResult).toMatchObject({
+      messageIds: ["patched", "media-post-1"],
+      visibleReplySent: true,
+      content: "Spoken answer",
+    });
+  });
+
   it("falls back with visible text when TTS supplement preview finalization fails", async () => {
     const draftStream = createDraftStreamMock();
-    const deliverFinal = vi.fn(async () => {});
+    const deliverFinal = createDeliverFinalMock();
     updateMattermostPostSpy.mockRejectedValueOnce(new Error("edit failed"));
 
     await deliverMattermostReplyWithDraftPreview({
@@ -504,7 +577,7 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
 
   it("keeps already-delivered TTS supplement fallback audio-only", async () => {
     const draftStream = createDraftStreamMock();
-    const deliverFinal = vi.fn(async () => {});
+    const deliverFinal = createDeliverFinalMock();
     updateMattermostPostSpy.mockRejectedValueOnce(new Error("edit failed"));
 
     await deliverMattermostReplyWithDraftPreview({
@@ -541,7 +614,7 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
 
   it("does not flush error finals before normal delivery", async () => {
     const draftStream = createDraftStreamMock();
-    const deliverFinal = vi.fn(async () => {});
+    const deliverFinal = createDeliverFinalMock();
 
     await deliverMattermostReplyWithDraftPreview({
       payload: { text: "Error", isError: true } as never,
@@ -563,7 +636,7 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
 
   it("finalizes the preview in place when the final targets the same thread", async () => {
     const draftStream = createDraftStreamMock();
-    const deliverFinal = vi.fn(async () => {});
+    const deliverFinal = createDeliverFinalMock();
     const client = createMattermostClientMock();
 
     await deliverMattermostReplyWithDraftPreview({

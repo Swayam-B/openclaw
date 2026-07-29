@@ -1,5 +1,7 @@
 // Mattermost tests cover monitor.inbound system event plugin behavior.
+import { createChannelPartialDeliveryError } from "openclaw/plugin-sdk/channel-inbound";
 import { createInboundDebouncer } from "openclaw/plugin-sdk/channel-inbound-debounce";
+import { createMessageReceiptFromOutboundResults } from "openclaw/plugin-sdk/channel-outbound";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MattermostPost } from "./client.js";
 import type { MattermostEventPayload } from "./monitor-websocket.js";
@@ -85,6 +87,7 @@ const mockState = vi.hoisted(() => ({
   createReplyDispatcherWithTyping: vi.fn(),
   createMattermostClient: vi.fn(),
   createMattermostDraftStream: vi.fn(),
+  deliveryPlanObserver: vi.fn(),
   dispatchInboundMessage: vi.fn(),
   enqueueSystemEvent: vi.fn(),
   fetchMattermostMe: vi.fn(),
@@ -285,6 +288,7 @@ function createRuntimeCore(
       ctxPayload: { SessionKey?: string };
       dispatcherOptions?: Record<string, unknown>;
       delivery: {
+        observeMessageSent?: true;
         deliver: (
           payload: ReplyPayload,
           info: { kind: "tool" | "block" | "final" },
@@ -299,6 +303,7 @@ function createRuntimeCore(
         onRecordError?: (err: unknown) => void;
       };
     }) => {
+      mockState.deliveryPlanObserver(turn.delivery.observeMessageSent);
       await recordInboundSession({
         storePath: "/tmp/openclaw-test-sessions.json",
         sessionKey: turn.ctxPayload.SessionKey ?? turn.route.sessionKey,
@@ -568,6 +573,7 @@ describe("mattermost inbound user posts", () => {
 
     expect(mockState.enqueueSystemEvent).not.toHaveBeenCalled();
     expect(mockState.dispatchInboundMessage).toHaveBeenCalledTimes(1);
+    expect(mockState.deliveryPlanObserver).toHaveBeenCalledExactlyOnceWith(true);
     const ctx = mockState.dispatchInboundMessage.mock.calls.at(0)?.[0].ctx;
     expect(ctx?.BodyForAgent).toBe("hello from mattermost");
     expect(ctx?.ConversationLabel).toBe("Town Square id:chan-1");
@@ -1791,6 +1797,75 @@ describe("mattermost inbound user posts", () => {
       "default",
       "chan-1",
       "thread-root-confirmed-preview",
+      { agentId: "main" },
+    );
+  });
+
+  it("records participation when a later send step fails after a visible thread post", async () => {
+    const receipt = createMessageReceiptFromOutboundResults({
+      results: [{ channel: "mattermost", messageId: "partial-post-1", channelId: "chan-1" }],
+      kind: "text",
+      replyToId: "thread-root-partial",
+    });
+    mockState.sendMessageMattermost.mockRejectedValueOnce(
+      createChannelPartialDeliveryError(new Error("bookkeeping failed"), {
+        messageIds: ["partial-post-1"],
+        receipt,
+        visibleReplySent: true,
+        content: "Visible partial reply",
+      }),
+    );
+    mockState.createMattermostDraftStream.mockReturnValue({
+      update: vi.fn(),
+      updateAssistantText: vi.fn(),
+      forceNewMessage: vi.fn(async () => {}),
+      flush: vi.fn(async () => {}),
+      postId: vi.fn(() => undefined),
+      clear: vi.fn(async () => {}),
+      discardPending: vi.fn(async () => {}),
+      seal: vi.fn(async () => {}),
+      stop: vi.fn(async () => {}),
+      settleBoundaries: vi.fn(async () => {}),
+      resolveFinalText: (text: string) => ({ kind: "full" as const, text }),
+    });
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    mockState.abortController = abortController;
+    mockState.dispatchInboundMessage.mockImplementation(async () => {
+      try {
+        const dispatcherOptions =
+          mockState.createReplyDispatcherWithTyping.mock.results.at(-1)?.value?.options;
+        await expect(
+          dispatcherOptions?.deliver({ text: "Visible partial reply" }, { kind: "final" }),
+        ).rejects.toThrow("bookkeeping failed");
+      } finally {
+        abortController.abort();
+      }
+    });
+
+    const monitor = monitorMattermostProvider({
+      config: testConfig,
+      runtime: testRuntime(),
+      abortSignal: abortController.signal,
+      webSocketFactory: () => socket,
+    });
+
+    await vi.waitFor(() => {
+      expect(socket.openListenerCount).toBeGreaterThan(0);
+    });
+    socket.emitOpen();
+    await emitMattermostChannelPost(socket, {
+      id: "post-partial-thread",
+      message: "reply in this thread",
+      rootId: "thread-root-partial",
+    });
+    socket.emitClose(1000);
+    await monitor;
+
+    expect(mockState.recordMattermostThreadParticipation).toHaveBeenCalledWith(
+      "default",
+      "chan-1",
+      "thread-root-partial",
       { agentId: "main" },
     );
   });

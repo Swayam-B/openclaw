@@ -1,6 +1,9 @@
 // Mattermost plugin module owns one accepted message's reply turn and delivery.
 import { resolveHumanDelayConfig } from "openclaw/plugin-sdk/agent-runtime";
-import type { ChannelInboundTurnPlan } from "openclaw/plugin-sdk/channel-inbound";
+import {
+  isChannelPartialDeliveryError,
+  type ChannelInboundTurnPlan,
+} from "openclaw/plugin-sdk/channel-inbound";
 import {
   bindIngressLifecycleToReplyOptions,
   buildChannelProgressDraftLineForEntry,
@@ -249,6 +252,7 @@ export async function dispatchMattermostInboundTurn(
     typingCallbacks,
   };
   const delivery: ChannelInboundTurnPlan["delivery"] = {
+    observeMessageSent: true,
     deliver: async (payloadEntry: ReplyPayload, info) => {
       if (info.kind === "final") {
         await enterBlockPreviewActivity("text");
@@ -264,7 +268,7 @@ export async function dispatchMattermostInboundTurn(
           });
         }
       };
-      await deliverMattermostReplyWithDraftPreview({
+      const result = await deliverMattermostReplyWithDraftPreview({
         payload: payloadEntry,
         info,
         kind,
@@ -289,7 +293,7 @@ export async function dispatchMattermostInboundTurn(
                   finalTextResolution.kind === "already-delivered" ? "" : finalTextResolution.text,
               }
             : payloadToDeliver;
-          const outcome = await deliverMattermostReplyPayload({
+          const result = await deliverMattermostReplyPayload({
             core,
             cfg,
             payload: resolvedPayload,
@@ -305,17 +309,25 @@ export async function dispatchMattermostInboundTurn(
             tableMode,
             sendMessage: sendMessageMattermost,
             onDmChannelResolution: deliveryBarrier.trackDmChannelResolution,
+          }).catch((error: unknown) => {
+            if (isChannelPartialDeliveryError(error)) {
+              markThreadParticipation();
+            }
+            throw error;
           });
           // Record only visible sends so reasoning-only, empty, or suppressed threads do not auto-engage later.
-          if (outcome === "text" || outcome === "media") {
+          if (result.outcome === "text" || result.outcome === "media") {
             markThreadParticipation();
-          } else if (outcome === "empty" && finalTextResolution?.kind === "already-delivered") {
+          } else if (
+            result.outcome === "empty" &&
+            finalTextResolution?.kind === "already-delivered"
+          ) {
             // The terminal payload confirms the already-published assistant block as
             // the visible final reply even though this delivery has no remaining text.
             markThreadParticipation();
           }
           const deliveryLog = formatMattermostFinalDeliveryOutcomeLog({
-            outcome,
+            outcome: result.outcome,
             payload: resolvedPayload,
             to,
             accountId: account.accountId,
@@ -324,11 +336,13 @@ export async function dispatchMattermostInboundTurn(
           if (deliveryLog) {
             runtime.log?.(deliveryLog);
           }
+          return result;
         },
       });
       if (info.kind === "final") {
         progressDraft.markFinalReplyDelivered();
       }
+      return result;
     },
     onError: (err, info) => {
       runtime.error?.(`mattermost ${info.kind} reply failed: ${String(err)}`);
