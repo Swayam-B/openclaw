@@ -37,6 +37,7 @@ final class DashboardManager {
     @ObservationIgnored private var switchGenerations: [ObjectIdentifier: UInt64] = [:]
     @ObservationIgnored private let authTokenProvider: @Sendable (GatewayConnection.Config) async -> String?
     @ObservationIgnored private let routeProbe: @Sendable () async -> Void
+    @ObservationIgnored private let endpointStateProvider: @Sendable () async -> GatewayEndpointState
     @ObservationIgnored private let mainWindowAutosaveName: String
     private(set) var gatewayEntries: [DashboardGatewayEntry] = []
     private(set) var frontmostDashboardTarget: DashboardGatewayTarget?
@@ -61,11 +62,15 @@ final class DashboardManager {
                 timeoutMs: 3000,
                 retryTransportFailures: false)
         },
+        endpointStateProvider: @escaping @Sendable () async -> GatewayEndpointState = {
+            await GatewayEndpointStore.shared.currentState()
+        },
         observeGatewayChanges: Bool = true,
         mainWindowAutosaveName: String = DashboardWindowLayout.windowFrameAutosaveName)
     {
         self.authTokenProvider = authTokenProvider
         self.routeProbe = routeProbe
+        self.endpointStateProvider = endpointStateProvider
         self.mainWindowAutosaveName = mainWindowAutosaveName
         if observeGatewayChanges {
             let names: [Notification.Name] = [
@@ -79,7 +84,13 @@ final class DashboardManager {
                     object: nil,
                     queue: .main)
                 { [weak self] _ in
-                    Task { @MainActor [weak self] in await self?.refreshGatewaySnapshots() }
+                    Task { @MainActor [weak self] in
+                        guard let self else { return }
+                        if name == .controlChannelStateDidChange {
+                            await self.handleControlChannelStateChange(ControlChannel.shared.state)
+                        }
+                        await self.refreshGatewaySnapshots()
+                    }
                 }
             }
             let windowNames: [Notification.Name] = [
@@ -96,6 +107,14 @@ final class DashboardManager {
                 }
             }
         }
+    }
+
+    private func handleControlChannelStateChange(_ state: ControlChannel.ConnectionState) async {
+        guard state == .connected else { return }
+        // Endpoint readiness can precede device authentication. Replay the
+        // unchanged route once the control socket owns a usable credential.
+        let endpointState = await self.endpointStateProvider()
+        await self.handleEndpointState(endpointState)
     }
 
     func configure(updater: UpdaterProviding) {
@@ -162,11 +181,11 @@ final class DashboardManager {
             token: authToken,
             password: password?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty)
         if routeChanged {
-            self.displayedRouteRevision = routeRevision
             guard auth.hasCredential else {
                 self.replaceWithRouteFailure(controller)
                 return
             }
+            self.displayedRouteRevision = routeRevision
             self.replaceController(
                 controller,
                 url: dashboardURL,
@@ -210,6 +229,7 @@ final class DashboardManager {
 
     private func replaceWithRouteFailure(_ current: DashboardWindowController) {
         self.switchGenerations[ObjectIdentifier(current)] = nil
+        self.displayedRouteRevision = nil
         current.releaseFrameAutosaveForReplacement()
         current.closeDashboard()
         let replacement = DashboardWindowController(
@@ -977,6 +997,9 @@ extension DashboardManager {
     static func _testMake(
         authTokenProvider: @escaping @Sendable (GatewayConnection.Config) async -> String? = { $0.token },
         routeProbe: @escaping @Sendable () async -> Void = {},
+        endpointStateProvider: @escaping @Sendable () async -> GatewayEndpointState = {
+            .unavailable(mode: .unconfigured, reason: "not configured")
+        },
         primaryEndpointProvider: (@Sendable (AppState.ConnectionMode) async throws
             -> GatewayConnection.EndpointSnapshot)? = nil,
         profileEndpointProvider: (@Sendable (String) async throws
@@ -987,6 +1010,7 @@ extension DashboardManager {
         let manager = DashboardManager(
             authTokenProvider: authTokenProvider,
             routeProbe: routeProbe,
+            endpointStateProvider: endpointStateProvider,
             observeGatewayChanges: false,
             mainWindowAutosaveName: "OpenClawDashboardWindow-Test-\(UUID().uuidString)")
         manager.testPrimaryEndpointProvider = primaryEndpointProvider
@@ -1017,6 +1041,10 @@ extension DashboardManager {
 
     func _testSwitchFrontmostDashboard(to target: DashboardGatewayTarget) async {
         await self.performSwitchFrontmostDashboard(to: target)
+    }
+
+    func _testHandleControlChannelStateChange(_ state: ControlChannel.ConnectionState) async {
+        await self.handleControlChannelStateChange(state)
     }
 
     func _testWindowTLSParams(for target: DashboardGatewayTarget) async throws -> GatewayTLSParams? {
