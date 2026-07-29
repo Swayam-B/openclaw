@@ -88,6 +88,15 @@ vi.mock("./runtime/runtime-registry-loader.js", () => ({
 
 const { scanFileInstallSourceRuntime } = await import("./install-security-scan.runtime.js");
 
+function scanPayload(config: Parameters<typeof scanFileInstallSourceRuntime>[0]["config"] = {}) {
+  return scanFileInstallSourceRuntime({
+    config,
+    filePath: "/tmp/payload.js",
+    logger: {},
+    pluginId: "payload",
+  });
+}
+
 function useIsolatedSdkBeforeInstallHook(pluginId = "sdk-install-gate") {
   getIsolatedGlobalHookRunnerRegistryMock.mockReturnValue({
     hooks: [],
@@ -189,17 +198,12 @@ describe("legacy install scan recovery and persistence", () => {
       trigger: { kind: "hook", hook: "before_install" },
     });
 
-    const result = await scanFileInstallSourceRuntime({
-      config: {
-        plugins: {
-          entries: {
-            "canonical-scanner": { enabled: true },
-          },
+    const result = await scanPayload({
+      plugins: {
+        entries: {
+          "canonical-scanner": { enabled: true },
         },
       },
-      filePath: "/tmp/payload.js",
-      logger: {},
-      pluginId: "payload",
     });
 
     expect(result?.blocked?.reason).toContain("invalid package install metadata");
@@ -210,121 +214,49 @@ describe("legacy install scan recovery and persistence", () => {
     );
   });
 
-  it("fails closed when a persisted config-path scanner root disappears", async () => {
-    const rootDir = "/plugins/missing-scanner";
-    loadPluginRegistrySnapshotMock.mockReturnValue({
-      diagnostics: [
-        {
-          level: "error",
+  it.each([
+    {
+      name: "persisted config-path scanner root disappears",
+      arrange: () => {
+        const rootDir = "/plugins/missing-scanner";
+        return {
+          configuredPath: rootDir,
           message: "plugin path not found",
-          source: rootDir,
-        },
-      ],
-      plugins: [],
-    });
-    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
-      plugins: [
-        {
-          compat: ["activation-capability-hint"],
-          enabled: true,
-          manifestPath: `${rootDir}/openclaw.plugin.json`,
-          origin: "config",
-          pluginId: "scanner",
           rootDir,
-          startup: { activationHooks: ["before_install"] },
-        },
-      ],
-    });
-    resolveManifestActivationPlanMock.mockReturnValue({
-      diagnostics: [],
-      entries: [],
-      pluginIds: [],
-      trigger: { kind: "hook", hook: "before_install" },
-    });
-
-    const result = await scanFileInstallSourceRuntime({
-      config: {
-        plugins: {
-          load: { paths: [rootDir] },
-        },
+        };
       },
-      filePath: "/tmp/payload.js",
-      logger: {},
-      pluginId: "payload",
-    });
-
-    expect(result).toEqual({
-      blocked: {
-        code: "security_scan_failed",
-        reason:
-          "Installation blocked because before_install hook failed: hook provider manifest discovery failed: plugin path not found",
+    },
+    {
+      name: "configured scanner container disappears",
+      arrange: () => {
+        const configuredPath = "/plugins/scanners";
+        return {
+          configuredPath,
+          message: `plugin path not found: ${configuredPath}`,
+          rootDir: `${configuredPath}/gate`,
+        };
       },
-    });
-    expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
-  });
-
-  it("fails closed when a configured scanner container disappears", async () => {
-    const containerDir = "/plugins/scanners";
-    const rootDir = `${containerDir}/gate`;
+    },
+    {
+      name: "configured scanner symlink becomes dangling",
+      arrange: () => {
+        const tempDir = tempDirs.make("openclaw-scanner-link-");
+        const containerTarget = path.join(tempDir, "scanner-target");
+        const configuredPath = path.join(tempDir, "configured-scanners");
+        fs.mkdirSync(containerTarget);
+        fs.symlinkSync(containerTarget, configuredPath);
+        fs.rmSync(containerTarget, { recursive: true });
+        return {
+          configuredPath,
+          message: `plugin path not found: ${configuredPath}`,
+          rootDir: path.join(containerTarget, "gate"),
+        };
+      },
+    },
+  ])("fails closed when $name", async ({ arrange }) => {
+    const { configuredPath, message, rootDir } = arrange();
     loadPluginRegistrySnapshotMock.mockReturnValue({
-      diagnostics: [
-        {
-          level: "error",
-          message: `plugin path not found: ${containerDir}`,
-          source: containerDir,
-        },
-      ],
-      plugins: [],
-    });
-    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
-      plugins: [
-        {
-          compat: ["activation-capability-hint"],
-          enabled: true,
-          manifestPath: `${rootDir}/openclaw.plugin.json`,
-          origin: "config",
-          pluginId: "scanner",
-          rootDir,
-          startup: { activationHooks: ["before_install"] },
-        },
-      ],
-    });
-
-    const result = await scanFileInstallSourceRuntime({
-      config: {
-        plugins: {
-          load: { paths: [containerDir] },
-        },
-      },
-      filePath: "/tmp/payload.js",
-      logger: {},
-      pluginId: "payload",
-    });
-
-    expect(result?.blocked).toEqual({
-      code: "security_scan_failed",
-      reason: expect.stringContaining(`plugin path not found: ${containerDir}`),
-    });
-    expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
-  });
-
-  it("fails closed when a configured scanner symlink becomes dangling", async () => {
-    const tempDir = tempDirs.make("openclaw-scanner-link-");
-    const containerTarget = path.join(tempDir, "scanner-target");
-    const configuredLink = path.join(tempDir, "configured-scanners");
-    const rootDir = path.join(containerTarget, "gate");
-    fs.mkdirSync(containerTarget);
-    fs.symlinkSync(containerTarget, configuredLink);
-    fs.rmSync(containerTarget, { recursive: true });
-
-    loadPluginRegistrySnapshotMock.mockReturnValue({
-      diagnostics: [
-        {
-          level: "error",
-          message: `plugin path not found: ${configuredLink}`,
-          source: configuredLink,
-        },
-      ],
+      diagnostics: [{ level: "error", message, source: configuredPath }],
       plugins: [],
     });
     readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
@@ -341,20 +273,13 @@ describe("legacy install scan recovery and persistence", () => {
       ],
     });
 
-    const result = await scanFileInstallSourceRuntime({
-      config: {
-        plugins: {
-          load: { paths: [configuredLink] },
-        },
-      },
-      filePath: "/tmp/payload.js",
-      logger: {},
-      pluginId: "payload",
+    const result = await scanPayload({
+      plugins: { load: { paths: [configuredPath] } },
     });
 
     expect(result?.blocked).toEqual({
       code: "security_scan_failed",
-      reason: expect.stringContaining(`plugin path not found: ${configuredLink}`),
+      reason: `Installation blocked because before_install hook failed: hook provider manifest discovery failed: ${message}`,
     });
     expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
   });
@@ -386,14 +311,7 @@ describe("legacy install scan recovery and persistence", () => {
       ],
     });
 
-    await expect(
-      scanFileInstallSourceRuntime({
-        config: {},
-        filePath: "/tmp/payload.js",
-        logger: {},
-        pluginId: "payload",
-      }),
-    ).resolves.toBeUndefined();
+    await expect(scanPayload()).resolves.toBeUndefined();
 
     expect(resolveManifestActivationPlanMock).not.toHaveBeenCalled();
     expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
@@ -449,16 +367,11 @@ describe("legacy install scan recovery and persistence", () => {
     });
 
     await expect(
-      scanFileInstallSourceRuntime({
-        config: {
-          plugins: {
-            allow: ["scanner"],
-            load: { paths: [overrideRoot] },
-          },
+      scanPayload({
+        plugins: {
+          allow: ["scanner"],
+          load: { paths: [overrideRoot] },
         },
-        filePath: "/tmp/payload.js",
-        logger: {},
-        pluginId: "payload",
       }),
     ).resolves.toBeUndefined();
 
@@ -469,7 +382,33 @@ describe("legacy install scan recovery and persistence", () => {
     );
   });
 
-  it("does not recover a malformed scanner after current config disables it", async () => {
+  it.each([
+    {
+      name: "current config disables it",
+      origin: "global" as const,
+      config: {
+        plugins: {
+          entries: {
+            other: { enabled: true },
+            scanner: { enabled: false },
+          },
+        },
+      },
+    },
+    {
+      name: "a restrictive allowlist excludes it",
+      origin: "config" as const,
+      config: {
+        plugins: {
+          allow: ["other"],
+          entries: {
+            other: { enabled: true },
+            scanner: { enabled: true },
+          },
+        },
+      },
+    },
+  ])("does not recover a malformed scanner when $name", async ({ config, origin }) => {
     const manifestPath = "/plugins/scanner/openclaw.plugin.json";
     loadPluginRegistrySnapshotMock.mockReturnValue({
       diagnostics: [
@@ -487,7 +426,7 @@ describe("legacy install scan recovery and persistence", () => {
         {
           compat: ["activation-capability-hint"],
           manifestPath,
-          origin: "global",
+          origin,
           pluginId: "scanner",
           startup: { activationHooks: ["before_install"] },
         },
@@ -507,78 +446,7 @@ describe("legacy install scan recovery and persistence", () => {
     });
     getGlobalHookRunnerMock.mockReturnValue(null);
 
-    await expect(
-      scanFileInstallSourceRuntime({
-        config: {
-          plugins: {
-            entries: {
-              other: { enabled: true },
-              scanner: { enabled: false },
-            },
-          },
-        },
-        filePath: "/tmp/payload.js",
-        logger: {},
-        pluginId: "payload",
-      }),
-    ).resolves.toBeUndefined();
-
-    expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
-  });
-
-  it("does not recover a config-path scanner excluded by a restrictive allowlist", async () => {
-    const manifestPath = "/plugins/scanner/openclaw.plugin.json";
-    loadPluginRegistrySnapshotMock.mockReturnValue({
-      diagnostics: [
-        {
-          level: "error",
-          message: "scanner manifest could not be parsed",
-          pluginId: "scanner",
-          source: manifestPath,
-        },
-      ],
-      plugins: [],
-    });
-    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
-      plugins: [
-        {
-          compat: ["activation-capability-hint"],
-          manifestPath,
-          origin: "config",
-          pluginId: "scanner",
-          startup: { activationHooks: ["before_install"] },
-        },
-      ],
-    });
-    resolveManifestActivationPlanMock.mockReturnValue({
-      diagnostics: [
-        {
-          level: "error",
-          message: "scanner manifest could not be parsed",
-          pluginId: "scanner",
-        },
-      ],
-      entries: [],
-      pluginIds: [],
-      trigger: { kind: "hook", hook: "before_install" },
-    });
-    getGlobalHookRunnerMock.mockReturnValue(null);
-
-    await expect(
-      scanFileInstallSourceRuntime({
-        config: {
-          plugins: {
-            allow: ["other"],
-            entries: {
-              other: { enabled: true },
-            },
-          },
-        },
-        filePath: "/tmp/payload.js",
-        logger: {},
-        pluginId: "payload",
-      }),
-    ).resolves.toBeUndefined();
+    await expect(scanPayload(config)).resolves.toBeUndefined();
 
     expect(loadIsolatedPluginRegistryMock).not.toHaveBeenCalled();
   });
@@ -617,18 +485,13 @@ describe("legacy install scan recovery and persistence", () => {
     });
 
     await expect(
-      scanFileInstallSourceRuntime({
-        config: {
-          plugins: {
-            entries: {
-              "broken-provider": { enabled: true },
-              scanner: { enabled: true },
-            },
+      scanPayload({
+        plugins: {
+          entries: {
+            "broken-provider": { enabled: true },
+            scanner: { enabled: true },
           },
         },
-        filePath: "/tmp/payload.js",
-        logger: {},
-        pluginId: "payload",
       }),
     ).resolves.toBeUndefined();
 
@@ -673,12 +536,7 @@ describe("legacy install scan recovery and persistence", () => {
     const runBeforeInstall = vi.fn().mockResolvedValue(undefined);
     getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
 
-    await scanFileInstallSourceRuntime({
-      config,
-      filePath: "/tmp/payload.js",
-      logger: {},
-      pluginId: "payload",
-    });
+    await scanPayload(config);
 
     expect(resolveManifestActivationPlanMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -698,14 +556,26 @@ describe("legacy install scan recovery and persistence", () => {
     });
   });
 
-  it("fails closed when discovery skips a persisted scanner", async () => {
-    const compatibilityMessage =
-      "plugin requires plugin API >=2026.8.1, but this host is 2026.7.2; skipping discovery";
+  it.each([
+    {
+      name: "discovery skips a persisted scanner",
+      message:
+        "plugin requires plugin API >=2026.8.1, but this host is 2026.7.2; skipping discovery",
+      compat: ["activation-capability-hint"],
+      startup: { activationHooks: ["before_install"] },
+    },
+    {
+      name: "legacy scanner metadata lacks hook fields",
+      message: "invalid package plugin API metadata; skipping discovery",
+      compat: [],
+      startup: {},
+    },
+  ])("fails closed when $name", async ({ compat, message, startup }) => {
     loadPluginRegistrySnapshotMock.mockReturnValue({
       diagnostics: [
         {
           level: "warn",
-          message: compatibilityMessage,
+          message,
           pluginId: "scanner",
         },
       ],
@@ -714,72 +584,25 @@ describe("legacy install scan recovery and persistence", () => {
     readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
       plugins: [
         {
-          compat: ["activation-capability-hint"],
+          compat,
           origin: "global",
           pluginId: "scanner",
-          startup: { activationHooks: ["before_install"] },
+          startup,
         },
       ],
     });
 
-    const result = await scanFileInstallSourceRuntime({
-      config: {
-        plugins: {
-          entries: {
-            scanner: { enabled: true },
-          },
+    const result = await scanPayload({
+      plugins: {
+        entries: {
+          scanner: { enabled: true },
         },
       },
-      filePath: "/tmp/payload.js",
-      logger: {},
-      pluginId: "payload",
     });
 
     expect(result?.blocked).toEqual({
       code: "security_scan_failed",
-      reason: expect.stringContaining(compatibilityMessage),
-    });
-  });
-
-  it("fails closed on discovery errors when legacy scanner metadata lacks hook fields", async () => {
-    const discoveryMessage = "invalid package plugin API metadata; skipping discovery";
-    loadPluginRegistrySnapshotMock.mockReturnValue({
-      diagnostics: [
-        {
-          level: "warn",
-          message: discoveryMessage,
-          pluginId: "scanner",
-        },
-      ],
-      plugins: [],
-    });
-    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
-      plugins: [
-        {
-          compat: [],
-          origin: "global",
-          pluginId: "scanner",
-          startup: {},
-        },
-      ],
-    });
-
-    const result = await scanFileInstallSourceRuntime({
-      config: {
-        plugins: {
-          entries: {
-            scanner: { enabled: true },
-          },
-        },
-      },
-      filePath: "/tmp/payload.js",
-      logger: {},
-      pluginId: "payload",
-    });
-
-    expect(result?.blocked).toEqual({
-      code: "security_scan_failed",
-      reason: expect.stringContaining(discoveryMessage),
+      reason: expect.stringContaining(message),
     });
   });
 

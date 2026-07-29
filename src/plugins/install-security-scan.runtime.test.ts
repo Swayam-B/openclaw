@@ -163,94 +163,88 @@ beforeEach(() => {
 });
 
 describe("install security scan official bypass", () => {
-  it("bypasses built-in friction but still runs hooks for bundled OpenClaw sources", async () => {
-    const hasHooks = vi.fn().mockReturnValue(true);
-    const runBeforeInstall = vi.fn().mockResolvedValue(undefined);
-    getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
-    useIsolatedSdkBeforeInstallHook();
-
-    const result = await scanBundleInstallSourceRuntime({
-      logger: {},
-      pluginId: "openclaw/kitchen-sink",
-      sourceDir: "/tmp/openclaw-bundled-plugin",
-      source: { kind: "bundled", authority: "openclaw", mutable: false, network: false },
-    });
-
-    expect(result).toBeUndefined();
-    expectBuiltinInstallFrictionBypassed();
-    expect(resolveManifestActivationPlanMock).not.toHaveBeenCalled();
-    expect(runBeforeInstall).toHaveBeenCalledOnce();
-  });
-
-  it("bypasses built-in friction but still lets hooks block official ClawHub sources", async () => {
-    const hasHooks = vi.fn().mockReturnValue(true);
-    const runBeforeInstall = vi.fn().mockResolvedValue({
-      block: true,
-      blockReason: "scanner rejected source",
-    });
-    getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
-    useIsolatedSdkBeforeInstallHook();
-
-    const result = await scanBundleInstallSourceRuntime({
-      logger: {},
-      pluginId: "@openclaw/matrix",
-      sourceDir: "/tmp/openclaw-official-clawhub-plugin",
-      source: { kind: "clawhub", authority: "official", mutable: false, network: true },
-    });
-
-    expect(result).toEqual({
-      blocked: {
-        code: "security_scan_blocked",
-        reason: "scanner rejected source",
+  it.each([
+    {
+      name: "bundled OpenClaw plugin sources",
+      run: () =>
+        scanBundleInstallSourceRuntime({
+          logger: {},
+          pluginId: "openclaw/kitchen-sink",
+          sourceDir: "/tmp/openclaw-bundled-plugin",
+          source: { kind: "bundled", authority: "openclaw", mutable: false, network: false },
+        }),
+      hookResult: undefined,
+      expectedResult: undefined,
+    },
+    {
+      name: "official ClawHub plugin sources",
+      run: () =>
+        scanBundleInstallSourceRuntime({
+          logger: {},
+          pluginId: "@openclaw/matrix",
+          sourceDir: "/tmp/openclaw-official-clawhub-plugin",
+          source: { kind: "clawhub", authority: "official", mutable: false, network: true },
+        }),
+      hookResult: {
+        block: true,
+        blockReason: "scanner rejected source",
       },
-    });
-    expectBuiltinInstallFrictionBypassed();
-  });
-
-  it("bypasses built-in friction but still runs hooks for bundled OpenClaw skills", async () => {
-    const hasHooks = vi.fn().mockReturnValue(true);
-    const runBeforeInstall = vi.fn().mockResolvedValue(undefined);
-    getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
-    useIsolatedSdkBeforeInstallHook();
-
-    const result = await evaluateSkillInstallPolicyRuntime({
-      workspaceDir: "/tmp/openclaw-workspace",
-      installId: "node",
-      logger: {},
-      origin: {
-        type: "openclaw-bundled",
-        skillName: "peekaboo",
-        installId: "node",
+      expectedResult: {
+        blocked: {
+          code: "security_scan_blocked" as const,
+          reason: "scanner rejected source",
+        },
       },
-      source: { kind: "bundled", authority: "openclaw", mutable: false, network: false },
-      skillName: "peekaboo",
-      sourceDir: "/tmp/openclaw-bundled-skill/peekaboo",
-    });
+    },
+    {
+      name: "bundled OpenClaw skills",
+      run: () =>
+        evaluateSkillInstallPolicyRuntime({
+          workspaceDir: "/tmp/openclaw-workspace",
+          installId: "node",
+          logger: {},
+          origin: {
+            type: "openclaw-bundled",
+            skillName: "peekaboo",
+            installId: "node",
+          },
+          source: { kind: "bundled", authority: "openclaw", mutable: false, network: false },
+          skillName: "peekaboo",
+          sourceDir: "/tmp/openclaw-bundled-skill/peekaboo",
+        }),
+      hookResult: undefined,
+      expectedResult: undefined,
+    },
+    {
+      name: "official package sources",
+      run: () =>
+        scanPackageInstallSourceRuntime({
+          extensions: ["index.js"],
+          logger: {},
+          packageDir: "/tmp/openclaw-official-package",
+          pluginId: "matrix",
+          source: { kind: "npm", authority: "official", mutable: false, network: true },
+          trustedSourceLinkedOfficialInstall: true,
+        }),
+      hookResult: undefined,
+      expectedResult: undefined,
+    },
+  ])(
+    "bypasses built-in friction but still runs hooks for $name",
+    async ({ expectedResult, hookResult, run }) => {
+      const hasHooks = vi.fn().mockReturnValue(true);
+      const runBeforeInstall = vi.fn().mockResolvedValue(hookResult);
+      getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
+      useIsolatedSdkBeforeInstallHook();
 
-    expect(result).toBeUndefined();
-    expectBuiltinInstallFrictionBypassed();
-    expect(runBeforeInstall).toHaveBeenCalledOnce();
-  });
+      const result = await run();
 
-  it("bypasses built-in friction but still runs hooks for official package sources", async () => {
-    const hasHooks = vi.fn().mockReturnValue(true);
-    const runBeforeInstall = vi.fn().mockResolvedValue(undefined);
-    getGlobalHookRunnerMock.mockReturnValue({ hasHooks, runBeforeInstall });
-    useIsolatedSdkBeforeInstallHook();
-
-    const result = await scanPackageInstallSourceRuntime({
-      extensions: ["index.js"],
-      logger: {},
-      packageDir: "/tmp/openclaw-official-package",
-      pluginId: "matrix",
-      source: { kind: "npm", authority: "official", mutable: false, network: true },
-      trustedSourceLinkedOfficialInstall: true,
-    });
-
-    expect(result).toBeUndefined();
-    expectBuiltinInstallFrictionBypassed();
-    expect(runBeforeInstall).toHaveBeenCalledOnce();
-  });
+      expect(result).toEqual(expectedResult);
+      expectBuiltinInstallFrictionBypassed();
+      expect(resolveManifestActivationPlanMock).not.toHaveBeenCalled();
+      expect(runBeforeInstall).toHaveBeenCalledOnce();
+    },
+  );
 
   it("runs only operator policy for official immutable npm sources", async () => {
     const result = await preflightPluginNpmInstallPolicyRuntime({
