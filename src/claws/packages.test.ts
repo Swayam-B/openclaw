@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { installClawPackages } from "./packages.js";
+import { installClawPackages, preflightClawPackage } from "./packages.js";
 import type { PersistedClawPackageRef } from "./provenance.js";
 import type { ClawAddPlan, ResolvedClawPackage } from "./types.js";
 
@@ -117,6 +117,88 @@ const probePlugin = vi.fn(async ({ spec }: { spec: string }) => {
   };
 });
 
+describe("preflightClawPackage", () => {
+  it("preserves live extension-directory conflict checks for a new plugin install", async () => {
+    const createProbeExtensionsDir = vi.fn();
+    const liveProbe = vi.fn(async () => ({
+      ok: false as const,
+      code: "plugin_target_exists" as never,
+      error: "plugin already exists: /tmp/extensions/audit",
+    }));
+
+    await expect(
+      preflightClawPackage(pluginPackage, "/tmp/workspace", {
+        preflightPlugin: vi.fn(async () => ({
+          ok: true as const,
+          action: "install" as const,
+          request: {} as never,
+        })),
+        probePlugin: liveProbe,
+        createProbeExtensionsDir,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      message: "plugin already exists: /tmp/extensions/audit",
+    });
+    expect(liveProbe).toHaveBeenCalledWith(
+      expect.not.objectContaining({ extensionsDir: expect.anything() }),
+    );
+    expect(createProbeExtensionsDir).not.toHaveBeenCalled();
+  });
+
+  it("inspects an exact installed plugin outside its live extension directory", async () => {
+    const removeProbeExtensionsDir = vi.fn(async () => {
+      throw new Error("temporary directory is still busy");
+    });
+    const isolatedProbe = vi.fn(async () => ({
+      ok: true as const,
+      pluginId: "audit",
+      packageName: "@owner/audit",
+      targetDir: "/tmp/claw-plugin-probe/audit",
+      extensions: [],
+      artifactInspection: {
+        format: "openclaw" as const,
+        mapped: ["plugin"],
+        unavailable: [],
+      },
+      clawhub: {
+        source: "clawhub" as const,
+        clawhubUrl: "https://clawhub.ai",
+        clawhubPackage: "@owner/audit",
+        clawhubFamily: "code-plugin" as const,
+        integrity,
+      },
+    }));
+
+    await expect(
+      preflightClawPackage(pluginPackage, "/tmp/workspace", {
+        preflightPlugin: vi.fn(async () => ({
+          ok: true as const,
+          action: "reuse" as const,
+          request: {} as never,
+          installedId: "audit",
+          installedVersion: "2.0.1",
+          installedIntegrity: integrity,
+        })),
+        probePlugin: isolatedProbe,
+        createProbeExtensionsDir: vi.fn(async () => "/tmp/claw-plugin-probe"),
+        removeProbeExtensionsDir,
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      action: "reuse",
+      installId: "audit",
+      detectedFormat: "openclaw",
+      mapped: ["plugin"],
+      unavailable: [],
+    });
+    expect(isolatedProbe).toHaveBeenCalledWith(
+      expect.objectContaining({ extensionsDir: "/tmp/claw-plugin-probe", dryRun: true }),
+    );
+    expect(removeProbeExtensionsDir).toHaveBeenCalledWith("/tmp/claw-plugin-probe");
+  });
+});
+
 describe("installClawPackages", () => {
   it("installs skill packages into the planned workspace with the resolved digest", async () => {
     const skillIntegrity = `sha256-${Buffer.from("a".repeat(64), "hex").toString("base64")}`;
@@ -184,6 +266,7 @@ describe("installClawPackages", () => {
   });
 
   it("installs plugins through the shared plugin surface", async () => {
+    probePlugin.mockClear();
     const installPlugin = vi.fn().mockResolvedValue(undefined);
     const persistPackageRef = vi.fn().mockReturnValue({
       kind: "plugin",
@@ -217,6 +300,9 @@ describe("installClawPackages", () => {
         clawManaged: true,
       }),
     );
+    expect(probePlugin).toHaveBeenCalledWith(
+      expect.not.objectContaining({ extensionsDir: expect.anything() }),
+    );
     expect(persistPackageRef).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -232,6 +318,7 @@ describe("installClawPackages", () => {
   });
 
   it("records a dependency ref without reinstalling an exact reused plugin", async () => {
+    probePlugin.mockClear();
     const extension = {
       id: "audit-tools",
       format: "claude" as const,
@@ -262,6 +349,9 @@ describe("installClawPackages", () => {
     });
 
     expect(installPlugin).not.toHaveBeenCalled();
+    expect(probePlugin).toHaveBeenCalledWith(
+      expect.objectContaining({ extensionsDir: expect.any(String) }),
+    );
     expect(persistPackageRef).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
