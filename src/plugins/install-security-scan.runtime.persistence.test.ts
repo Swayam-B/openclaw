@@ -2,89 +2,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
-
-const runInstallPolicyMock = vi.fn();
-const findBlockedManifestDependenciesMock = vi.fn();
-const findBlockedNodeModulesDirectoryMock = vi.fn();
-const findBlockedNodeModulesFileAliasMock = vi.fn();
-const findBlockedPackageDirectoryInPathMock = vi.fn();
-const findBlockedPackageFileAliasInPathMock = vi.fn();
-const getGlobalHookRunnerMock = vi.fn();
-const getIsolatedGlobalHookRunnerRegistryMock = vi.fn();
-const collectLivePluginRegistriesMock = vi.fn();
-const getPluginRegistryWorkspaceDirMock = vi.fn();
-const createHookRunnerMock = vi.fn();
-const resolveManifestActivationPlanMock = vi.fn();
-const loadPluginRegistrySnapshotMock = vi.fn();
-const loadIsolatedPluginRegistryMock = vi.fn();
-const loadInstalledPluginIndexInstallRecordsSyncMock = vi.fn();
-const readPersistedInstalledPluginIndexSyncMock = vi.fn();
-const getRuntimeConfigMock = vi.fn();
+import {
+  getGlobalHookRunnerMock,
+  loadIsolatedPluginRegistryMock,
+  loadPluginRegistrySnapshotMock,
+  readPersistedInstalledPluginIndexSyncMock,
+  resetInstallSecurityScanRuntimeMocks,
+  resolveManifestActivationPlanMock,
+  runInstallPolicyMock,
+  useIsolatedSdkBeforeInstallHook,
+} from "./install-security-scan.runtime.test-support.js";
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
-
-vi.mock("../config/config.js", () => ({
-  getRuntimeConfig: () => getRuntimeConfigMock(),
-}));
-
-vi.mock("../security/install-policy.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../security/install-policy.js")>();
-  return {
-    ...actual,
-    runInstallPolicy: (...args: unknown[]) => runInstallPolicyMock(...args),
-  };
-});
-
-vi.mock("./dependency-denylist.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./dependency-denylist.js")>();
-  return {
-    ...actual,
-    findBlockedManifestDependencies: (...args: unknown[]) =>
-      findBlockedManifestDependenciesMock(...args),
-    findBlockedNodeModulesDirectory: (...args: unknown[]) =>
-      findBlockedNodeModulesDirectoryMock(...args),
-    findBlockedNodeModulesFileAlias: (...args: unknown[]) =>
-      findBlockedNodeModulesFileAliasMock(...args),
-    findBlockedPackageDirectoryInPath: (...args: unknown[]) =>
-      findBlockedPackageDirectoryInPathMock(...args),
-    findBlockedPackageFileAliasInPath: (...args: unknown[]) =>
-      findBlockedPackageFileAliasInPathMock(...args),
-  };
-});
-
-vi.mock("./hook-runner-global-state.js", () => ({
-  getIsolatedGlobalHookRunnerRegistry: () => getIsolatedGlobalHookRunnerRegistryMock(),
-}));
-
-vi.mock("./runtime.js", () => ({
-  collectLivePluginRegistries: () => collectLivePluginRegistriesMock(),
-  getPluginRegistryWorkspaceDir: (...args: unknown[]) => getPluginRegistryWorkspaceDirMock(...args),
-}));
-
-vi.mock("./hooks.js", () => ({
-  createHookRunner: (...args: unknown[]) => createHookRunnerMock(...args),
-}));
-
-vi.mock("./activation-planner.js", () => ({
-  resolveManifestActivationPlan: (...args: unknown[]) => resolveManifestActivationPlanMock(...args),
-}));
-
-vi.mock("./plugin-registry-snapshot.js", () => ({
-  loadPluginRegistrySnapshot: (...args: unknown[]) => loadPluginRegistrySnapshotMock(...args),
-}));
-
-vi.mock("./installed-plugin-index-store.js", () => ({
-  readPersistedInstalledPluginIndexSync: (...args: unknown[]) =>
-    readPersistedInstalledPluginIndexSyncMock(...args),
-}));
-
-vi.mock("./installed-plugin-index-record-reader.js", () => ({
-  loadInstalledPluginIndexInstallRecordsSync: (...args: unknown[]) =>
-    loadInstalledPluginIndexInstallRecordsSyncMock(...args),
-}));
-
-vi.mock("./runtime/runtime-registry-loader.js", () => ({
-  loadIsolatedPluginRegistry: (...args: unknown[]) => loadIsolatedPluginRegistryMock(...args),
-}));
 
 const { scanFileInstallSourceRuntime } = await import("./install-security-scan.runtime.js");
 
@@ -97,67 +25,33 @@ function scanPayload(config: Parameters<typeof scanFileInstallSourceRuntime>[0][
   });
 }
 
-function useIsolatedSdkBeforeInstallHook(pluginId = "sdk-install-gate") {
-  getIsolatedGlobalHookRunnerRegistryMock.mockReturnValue({
-    hooks: [],
-    typedHooks: [
+type PersistedScanner = {
+  compat: string[];
+  enabled?: boolean;
+  manifestPath?: string;
+  origin: "config" | "global";
+  packageJson?: { hash: string; path: string };
+  pluginId: string;
+  rootDir?: string;
+  startup: { activationHooks?: string[] };
+};
+
+function persistScanner(overrides: Partial<PersistedScanner> = {}) {
+  readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
+    plugins: [
       {
-        handler: vi.fn(),
-        hookName: "before_install",
-        pluginId,
-        priority: 0,
-        source: "sdk",
+        compat: ["activation-capability-hint"],
+        origin: "global",
+        pluginId: "scanner",
+        startup: { activationHooks: ["before_install"] },
+        ...overrides,
       },
     ],
-    plugins: [{ id: pluginId, status: "loaded" }],
   });
 }
 
 beforeEach(() => {
-  getRuntimeConfigMock.mockReset();
-  getRuntimeConfigMock.mockReturnValue({});
-  runInstallPolicyMock.mockReset();
-  findBlockedManifestDependenciesMock.mockReset();
-  findBlockedNodeModulesDirectoryMock.mockReset();
-  findBlockedNodeModulesFileAliasMock.mockReset();
-  findBlockedPackageDirectoryInPathMock.mockReset();
-  findBlockedPackageFileAliasInPathMock.mockReset();
-  getGlobalHookRunnerMock.mockReset();
-  getIsolatedGlobalHookRunnerRegistryMock.mockReset();
-  getIsolatedGlobalHookRunnerRegistryMock.mockReturnValue(null);
-  collectLivePluginRegistriesMock.mockReset();
-  collectLivePluginRegistriesMock.mockReturnValue([]);
-  getPluginRegistryWorkspaceDirMock.mockReset();
-  getPluginRegistryWorkspaceDirMock.mockReturnValue(undefined);
-  createHookRunnerMock.mockReset();
-  createHookRunnerMock.mockImplementation(() => getGlobalHookRunnerMock());
-  resolveManifestActivationPlanMock.mockReset();
-  resolveManifestActivationPlanMock.mockReturnValue({
-    diagnostics: [],
-    entries: [],
-    pluginIds: [],
-    trigger: { kind: "hook", hook: "before_install" },
-  });
-  loadPluginRegistrySnapshotMock.mockReset();
-  loadPluginRegistrySnapshotMock.mockReturnValue({ diagnostics: [], plugins: [] });
-  loadIsolatedPluginRegistryMock.mockReset();
-  loadInstalledPluginIndexInstallRecordsSyncMock.mockReset();
-  loadInstalledPluginIndexInstallRecordsSyncMock.mockReturnValue({});
-  loadIsolatedPluginRegistryMock.mockImplementation(
-    (options: { onlyPluginIds?: readonly string[] } = {}) => ({
-      hooks: [],
-      plugins: (options.onlyPluginIds ?? []).map((id) => ({ id, status: "loaded" })),
-      typedHooks: (options.onlyPluginIds ?? []).map((pluginId) => ({
-        handler: vi.fn(),
-        hookName: "before_install",
-        pluginId,
-        priority: 0,
-        source: "test",
-      })),
-    }),
-  );
-  readPersistedInstalledPluginIndexSyncMock.mockReset();
-  readPersistedInstalledPluginIndexSyncMock.mockReturnValue(null);
+  resetInstallSecurityScanRuntimeMocks();
 });
 
 describe("legacy install scan recovery and persistence", () => {
@@ -175,21 +69,14 @@ describe("legacy install scan recovery and persistence", () => {
       ],
       plugins: [],
     });
-    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
-      plugins: [
-        {
-          compat: ["activation-capability-hint"],
-          manifestPath: `${rootDir}/openclaw.plugin.json`,
-          origin: "global",
-          packageJson: {
-            hash: "package-json-hash",
-            path: "package.json",
-          },
-          pluginId: "canonical-scanner",
-          rootDir,
-          startup: { activationHooks: ["before_install"] },
-        },
-      ],
+    persistScanner({
+      manifestPath: `${rootDir}/openclaw.plugin.json`,
+      packageJson: {
+        hash: "package-json-hash",
+        path: "package.json",
+      },
+      pluginId: "canonical-scanner",
+      rootDir,
     });
     resolveManifestActivationPlanMock.mockReturnValue({
       diagnostics: [],
@@ -259,18 +146,11 @@ describe("legacy install scan recovery and persistence", () => {
       diagnostics: [{ level: "error", message, source: configuredPath }],
       plugins: [],
     });
-    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
-      plugins: [
-        {
-          compat: ["activation-capability-hint"],
-          enabled: true,
-          manifestPath: path.join(rootDir, "openclaw.plugin.json"),
-          origin: "config",
-          pluginId: "scanner",
-          rootDir,
-          startup: { activationHooks: ["before_install"] },
-        },
-      ],
+    persistScanner({
+      enabled: true,
+      manifestPath: path.join(rootDir, "openclaw.plugin.json"),
+      origin: "config",
+      rootDir,
     });
 
     const result = await scanPayload({
@@ -297,18 +177,11 @@ describe("legacy install scan recovery and persistence", () => {
       ],
       plugins: [],
     });
-    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
-      plugins: [
-        {
-          compat: ["activation-capability-hint"],
-          enabled: true,
-          manifestPath: `${rootDir}/openclaw.plugin.json`,
-          origin: "config",
-          pluginId: "scanner",
-          rootDir,
-          startup: { activationHooks: ["before_install"] },
-        },
-      ],
+    persistScanner({
+      enabled: true,
+      manifestPath: `${rootDir}/openclaw.plugin.json`,
+      origin: "config",
+      rootDir,
     });
 
     await expect(scanPayload()).resolves.toBeUndefined();
@@ -340,18 +213,10 @@ describe("legacy install scan recovery and persistence", () => {
         },
       ],
     });
-    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
-      plugins: [
-        {
-          compat: ["activation-capability-hint"],
-          enabled: true,
-          manifestPath: `${persistedRoot}/openclaw.plugin.json`,
-          origin: "global",
-          pluginId: "scanner",
-          rootDir: persistedRoot,
-          startup: { activationHooks: ["before_install"] },
-        },
-      ],
+    persistScanner({
+      enabled: true,
+      manifestPath: `${persistedRoot}/openclaw.plugin.json`,
+      rootDir: persistedRoot,
     });
     resolveManifestActivationPlanMock.mockReturnValue({
       diagnostics: [],
@@ -421,16 +286,9 @@ describe("legacy install scan recovery and persistence", () => {
       ],
       plugins: [],
     });
-    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
-      plugins: [
-        {
-          compat: ["activation-capability-hint"],
-          manifestPath,
-          origin,
-          pluginId: "scanner",
-          startup: { activationHooks: ["before_install"] },
-        },
-      ],
+    persistScanner({
+      manifestPath,
+      origin,
     });
     resolveManifestActivationPlanMock.mockReturnValue({
       diagnostics: [
@@ -581,15 +439,9 @@ describe("legacy install scan recovery and persistence", () => {
       ],
       plugins: [],
     });
-    readPersistedInstalledPluginIndexSyncMock.mockReturnValue({
-      plugins: [
-        {
-          compat,
-          origin: "global",
-          pluginId: "scanner",
-          startup,
-        },
-      ],
+    persistScanner({
+      compat,
+      startup,
     });
 
     const result = await scanPayload({

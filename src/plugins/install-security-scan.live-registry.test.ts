@@ -1,14 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { withEnvAsync } from "../test-utils/env.js";
 import { listPluginCommands } from "./commands.js";
 import { initializeGlobalHookRunner, resetGlobalHookRunner } from "./hook-runner-global.js";
 import { createMockPluginRegistry } from "./hooks.test-fixtures.js";
 import {
-  evaluateSkillInstallPolicyRuntime,
-  scanFileInstallSourceRuntime,
-} from "./install-security-scan.runtime.js";
+  scanInstallPayload,
+  scanSkillInstall,
+  withInstallScanEnv,
+  writeBeforeInstallBlocker,
+} from "./install-security-scan.integration.test-support.js";
 import {
   cleanupPluginLoaderFixturesForTest,
   makeTempDir,
@@ -25,31 +26,6 @@ import {
   setActivePluginRegistry,
 } from "./runtime.js";
 import { ensurePluginRegistryLoaded } from "./runtime/runtime-registry-loader.js";
-
-function writeBeforeInstallBlocker(
-  id: string,
-  dir?: string,
-  options: { fullRegistrationOnly?: boolean; installScanRegistrationOnly?: boolean } = {},
-) {
-  const plugin = writePlugin({
-    id,
-    ...(dir ? { dir } : {}),
-    filename: dir ? "index.cjs" : `${id}.cjs`,
-    body: `module.exports = { id: ${JSON.stringify(id)}, register(api) {
-      ${options.fullRegistrationOnly ? 'if (api.registrationMode !== "full") return;' : ""}
-      ${options.installScanRegistrationOnly ? 'if (api.registrationMode !== "install-scan") return;' : ""}
-      api.on("before_install", (event) => ({
-        block: true,
-        blockReason: "blocked staged target " + event.targetName,
-      }));
-    } };`,
-  });
-  const manifestPath = path.join(plugin.dir, "openclaw.plugin.json");
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
-  manifest.activation = { onHooks: ["before_install"] };
-  fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
-  return plugin;
-}
 
 function writeCommandPlugin(id: string, dir?: string) {
   return writePlugin({
@@ -140,16 +116,6 @@ function writeLabeledBeforeInstallBlocker(
   return plugin;
 }
 
-function withInstallScanEnv<T>(stateDir: string, run: () => Promise<T>) {
-  return withEnvAsync(
-    {
-      OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
-      OPENCLAW_STATE_DIR: stateDir,
-    },
-    run,
-  );
-}
-
 afterEach(() => {
   Reflect.deleteProperty(globalThis, "__openclawInstallScannerInstances");
   resetGlobalHookRunner();
@@ -181,12 +147,7 @@ describe("live install hook provider registries", () => {
         onlyPluginIds: [commandPlugin.id],
       });
       expect(listPluginCommands().map((command) => command.name)).toContain("hello");
-      const scanResult = await scanFileInstallSourceRuntime({
-        config,
-        filePath: path.join(makeTempDir(), "payload.js"),
-        logger: {},
-        pluginId: "payload",
-      });
+      const scanResult = await scanInstallPayload(config);
       expect(listPluginCommands().map((command) => command.name)).toContain("hello");
       return scanResult;
     });
@@ -217,12 +178,7 @@ describe("live install hook provider registries", () => {
         workspaceDir,
         onlyPluginIds: [scanner.id],
       });
-      return await scanFileInstallSourceRuntime({
-        config,
-        filePath: path.join(makeTempDir(), "payload.js"),
-        logger: {},
-        pluginId: "payload",
-      });
+      return await scanInstallPayload(config);
     });
 
     expect(result?.blocked?.reason).toBe("scanner instance 1");
@@ -254,12 +210,7 @@ describe("live install hook provider registries", () => {
         workspaceDir,
         onlyPluginIds: [scanner.id],
       });
-      return await scanFileInstallSourceRuntime({
-        config: configFor(true),
-        filePath: path.join(makeTempDir(), "payload.js"),
-        logger: {},
-        pluginId: "payload",
-      });
+      return await scanInstallPayload(configFor(true));
     });
 
     expect(result?.blocked?.reason).toBe("current scanner config blocks");
@@ -288,12 +239,7 @@ describe("live install hook provider registries", () => {
         workspaceDir,
         onlyPluginIds: [scanner.id],
       });
-      return await scanFileInstallSourceRuntime({
-        config,
-        filePath: path.join(makeTempDir(), "payload.js"),
-        logger: {},
-        pluginId: "payload",
-      });
+      return await scanInstallPayload(config);
     });
 
     expect(result?.blocked?.reason).toBe("undeclared active scanner");
@@ -325,12 +271,7 @@ describe("live install hook provider registries", () => {
         workspaceDir,
         onlyPluginIds: [scanner.id],
       });
-      return await scanFileInstallSourceRuntime({
-        config: revokedConfig,
-        filePath: path.join(makeTempDir(), "payload.js"),
-        logger: {},
-        pluginId: "payload",
-      });
+      return await scanInstallPayload(revokedConfig);
     });
 
     expect(result).toBeUndefined();
@@ -364,12 +305,7 @@ describe("live install hook provider registries", () => {
         workspaceDir,
         onlyPluginIds: [scannerId],
       });
-      return await scanFileInstallSourceRuntime({
-        config: configFor(scannerB.file),
-        filePath: path.join(makeTempDir(), "payload.js"),
-        logger: {},
-        pluginId: "payload",
-      });
+      return await scanInstallPayload(configFor(scannerB.file));
     });
 
     expect(result?.blocked?.reason).toBe("current scanner source");
@@ -407,12 +343,7 @@ describe("live install hook provider registries", () => {
       });
       fs.unlinkSync(linkPath);
       fs.symlinkSync(scannerB.dir, linkPath, "dir");
-      return await scanFileInstallSourceRuntime({
-        config,
-        filePath: path.join(makeTempDir(), "payload.js"),
-        logger: {},
-        pluginId: "payload",
-      });
+      return await scanInstallPayload(config);
     });
 
     expect(result?.blocked?.reason).toBe("current symlink target");
@@ -444,23 +375,10 @@ describe("live install hook provider registries", () => {
     };
 
     const [firstResult, secondResult] = await withInstallScanEnv(stateDir, async () => {
-      const first = await scanFileInstallSourceRuntime({
-        config,
-        filePath: path.join(makeTempDir(), "first.js"),
-        logger: {},
-        pluginId: "first",
-      });
+      const first = await scanInstallPayload(config, "first");
       fs.unlinkSync(linkPath);
       fs.symlinkSync(scannerB.dir, linkPath, "dir");
-      return [
-        first,
-        await scanFileInstallSourceRuntime({
-          config,
-          filePath: path.join(makeTempDir(), "second.js"),
-          logger: {},
-          pluginId: "second",
-        }),
-      ];
+      return [first, await scanInstallPayload(config, "second")];
     });
 
     expect(firstResult?.blocked?.reason).toBe("old declared scanner");
@@ -488,16 +406,7 @@ describe("live install hook provider registries", () => {
     } as never);
     setActivePluginRegistry(setupRegistry, "setup-runtime", "default", workspaceDir);
 
-    const result = await withInstallScanEnv(
-      stateDir,
-      async () =>
-        await scanFileInstallSourceRuntime({
-          config,
-          filePath: path.join(makeTempDir(), "payload.js"),
-          logger: {},
-          pluginId: "payload",
-        }),
-    );
+    const result = await withInstallScanEnv(stateDir, () => scanInstallPayload(config));
 
     expect(result?.blocked?.reason).toBe("blocked staged target payload");
   });
@@ -532,15 +441,7 @@ describe("live install hook provider registries", () => {
         onlyPluginIds: [commandPlugin.id],
       });
       expect(listPluginCommands().map((command) => command.name)).toContain("hello");
-      const scanResult = await evaluateSkillInstallPolicyRuntime({
-        config,
-        workspaceDir: workspaceB,
-        installId: "node",
-        logger: {},
-        origin: { type: "workspace" },
-        skillName: "payload",
-        sourceDir: makeTempDir(),
-      });
+      const scanResult = await scanSkillInstall(config, workspaceB);
       expect(listPluginCommands().map((command) => command.name)).toContain("hello");
       return scanResult;
     });
@@ -579,15 +480,7 @@ describe("live install hook provider registries", () => {
         workspaceDir: workspaceA,
         onlyPluginIds: [scannerA.id],
       });
-      return await evaluateSkillInstallPolicyRuntime({
-        config,
-        workspaceDir: workspaceB,
-        installId: "node",
-        logger: {},
-        origin: { type: "workspace" },
-        skillName: "payload",
-        sourceDir: makeTempDir(),
-      });
+      return await scanSkillInstall(config, workspaceB);
     });
 
     expect(result?.blocked?.reason).toBe("workspace B scanner");
@@ -618,15 +511,7 @@ describe("live install hook provider registries", () => {
         workspaceDir: workspaceA,
         onlyPluginIds: [scanner.id],
       });
-      return await evaluateSkillInstallPolicyRuntime({
-        config: {},
-        workspaceDir: workspaceB,
-        installId: "node",
-        logger: {},
-        origin: { type: "workspace" },
-        skillName: "payload",
-        sourceDir: makeTempDir(),
-      });
+      return await scanSkillInstall({}, workspaceB);
     });
 
     expect(result).toBeUndefined();
@@ -650,22 +535,15 @@ describe("live install hook provider registries", () => {
     setActivePluginRegistry(createEmptyPluginRegistry(), "active", "default", workspaceDir);
     initializeGlobalHookRunner(sdkRegistry);
 
-    const result = await withInstallScanEnv(
-      stateDir,
-      async () =>
-        await scanFileInstallSourceRuntime({
-          config: {
-            agents: { defaults: { workspace: workspaceDir } },
-            plugins: {
-              enabled: false,
-              allow: ["other"],
-              deny: ["sdk-install-gate"],
-            },
-          },
-          filePath: path.join(makeTempDir(), "payload.js"),
-          logger: {},
-          pluginId: "payload",
-        }),
+    const result = await withInstallScanEnv(stateDir, () =>
+      scanInstallPayload({
+        agents: { defaults: { workspace: workspaceDir } },
+        plugins: {
+          enabled: false,
+          allow: ["other"],
+          deny: ["sdk-install-gate"],
+        },
+      }),
     );
 
     expect(result?.blocked?.reason).toBe("SDK install gate");
@@ -712,15 +590,7 @@ describe("live install hook provider registries", () => {
         workspaceDir: workspaceB,
         onlyPluginIds: [scannerB.id],
       });
-      return await evaluateSkillInstallPolicyRuntime({
-        config,
-        workspaceDir: workspaceB,
-        installId: "node",
-        logger: {},
-        origin: { type: "workspace" },
-        skillName: "payload",
-        sourceDir: makeTempDir(),
-      });
+      return await scanSkillInstall(config, workspaceB);
     });
 
     expect(result?.blocked?.reason).toBe("active workspace B scanner");
@@ -759,15 +629,7 @@ describe("live install hook provider registries", () => {
       pinActivePluginChannelRegistry(startupRegistry);
       setActivePluginRegistry(createEmptyPluginRegistry(), "scoped", "default", workspaceDir);
       expect(collectLivePluginRegistries()).toContain(startupRegistry);
-      return await evaluateSkillInstallPolicyRuntime({
-        config,
-        workspaceDir,
-        installId: "node",
-        logger: {},
-        origin: { type: "workspace" },
-        skillName: "payload",
-        sourceDir: makeTempDir(),
-      });
+      return await scanSkillInstall(config, workspaceDir);
     });
 
     expect(result?.blocked?.reason).toBe("same-workspace pinned scanner");
@@ -808,18 +670,8 @@ describe("live install hook provider registries", () => {
         onlyPluginIds: [scanner.id],
       });
       return [
-        await scanFileInstallSourceRuntime({
-          config: enabledConfig,
-          filePath: path.join(makeTempDir(), "first.js"),
-          logger: {},
-          pluginId: "first",
-        }),
-        await scanFileInstallSourceRuntime({
-          config: currentConfig,
-          filePath: path.join(makeTempDir(), "second.js"),
-          logger: {},
-          pluginId: "second",
-        }),
+        await scanInstallPayload(enabledConfig, "first"),
+        await scanInstallPayload(currentConfig, "second"),
       ];
     });
 

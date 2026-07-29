@@ -5,14 +5,15 @@ import {
   clearContextEnginesForOwner,
   getContextEngineRegistration,
 } from "../context-engine/registry.js";
-import { withEnvAsync } from "../test-utils/env.js";
 import { clearCompactionProviders, getCompactionProvider } from "./compaction-provider.js";
 import { resetGlobalHookRunner } from "./hook-runner-global.js";
 import {
-  evaluateSkillInstallPolicyRuntime,
-  scanBundleInstallSourceRuntime,
-  scanFileInstallSourceRuntime,
-} from "./install-security-scan.runtime.js";
+  scanInstallPayload,
+  scanSkillInstall,
+  withInstallScanEnv,
+  writeBeforeInstallBlocker,
+} from "./install-security-scan.integration.test-support.js";
+import { scanBundleInstallSourceRuntime } from "./install-security-scan.runtime.js";
 import { refreshPersistedInstalledPluginIndex } from "./installed-plugin-index-store.js";
 import {
   cleanupPluginLoaderFixturesForTest,
@@ -22,30 +23,6 @@ import {
   writePlugin,
 } from "./loader.test-fixtures.js";
 import { loadPluginRegistrySnapshot } from "./plugin-registry-snapshot.js";
-function writeBeforeInstallBlocker(
-  id: string,
-  dir?: string,
-  options: { fullRegistrationOnly?: boolean; installScanRegistrationOnly?: boolean } = {},
-) {
-  const plugin = writePlugin({
-    id,
-    ...(dir ? { dir } : {}),
-    filename: dir ? "index.cjs" : `${id}.cjs`,
-    body: `module.exports = { id: ${JSON.stringify(id)}, register(api) {
-      ${options.fullRegistrationOnly ? 'if (api.registrationMode !== "full") return;' : ""}
-      ${options.installScanRegistrationOnly ? 'if (api.registrationMode !== "install-scan") return;' : ""}
-      api.on("before_install", (event) => ({
-        block: true,
-        blockReason: "blocked staged target " + event.targetName,
-      }));
-    } };`,
-  });
-  const manifestPath = path.join(plugin.dir, "openclaw.plugin.json");
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
-  manifest.activation = { onHooks: ["before_install"] };
-  fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
-  return plugin;
-}
 function writeContextEngineBeforeInstallBlocker(id: string, contextEngineId: string) {
   const plugin = writePlugin({
     id,
@@ -88,25 +65,6 @@ function writeSideEffectingBeforeInstallBlocker(id: string, compactionProviderId
   return plugin;
 }
 
-function scanPayload(config: Parameters<typeof scanFileInstallSourceRuntime>[0]["config"]) {
-  return scanFileInstallSourceRuntime({
-    config,
-    filePath: path.join(makeTempDir(), "payload.js"),
-    logger: {},
-    pluginId: "payload",
-  });
-}
-
-function withInstallScanEnv<T>(stateDir: string, run: () => Promise<T>) {
-  return withEnvAsync(
-    {
-      OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
-      OPENCLAW_STATE_DIR: stateDir,
-    },
-    run,
-  );
-}
-
 afterEach(() => {
   Reflect.deleteProperty(globalThis, "__openclawInstallScannerInstances");
   clearContextEnginesForOwner("plugin:context-engine-scanner");
@@ -128,7 +86,7 @@ describe("install hook provider activation", () => {
         load: { paths: [scanner.file] },
       },
     };
-    const result = await withInstallScanEnv(stateDir, () => scanPayload(config));
+    const result = await withInstallScanEnv(stateDir, () => scanInstallPayload(config));
 
     expect(result).toEqual({
       blocked: {
@@ -150,7 +108,7 @@ describe("install hook provider activation", () => {
       },
     };
 
-    const result = await withInstallScanEnv(stateDir, () => scanPayload(config));
+    const result = await withInstallScanEnv(stateDir, () => scanInstallPayload(config));
 
     expect(result?.blocked?.reason).toBe("blocked staged target payload");
   });
@@ -165,7 +123,7 @@ describe("install hook provider activation", () => {
     );
 
     const result = await withInstallScanEnv(stateDir, () =>
-      scanPayload({ plugins: { load: { paths: [scanner.file] } } }),
+      scanInstallPayload({ plugins: { load: { paths: [scanner.file] } } }),
     );
 
     expect(result?.blocked?.reason).toBe("blocked without global side effects");
@@ -180,7 +138,7 @@ describe("install hook provider activation", () => {
     });
 
     const result = await withInstallScanEnv(stateDir, () =>
-      scanPayload({ plugins: { load: { paths: [scanner.file] } } }),
+      scanInstallPayload({ plugins: { load: { paths: [scanner.file] } } }),
     );
 
     expect(result?.blocked).toEqual({
@@ -207,7 +165,7 @@ describe("install hook provider activation", () => {
     fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
 
     const result = await withInstallScanEnv(stateDir, () =>
-      scanPayload({ plugins: { load: { paths: [scanner.file] } } }),
+      scanInstallPayload({ plugins: { load: { paths: [scanner.file] } } }),
     );
 
     expect(result?.blocked).toEqual({
@@ -234,7 +192,7 @@ describe("install hook provider activation", () => {
     fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
 
     const result = await withInstallScanEnv(stateDir, () =>
-      scanPayload({ plugins: { load: { paths: [plugin.file] } } }),
+      scanInstallPayload({ plugins: { load: { paths: [plugin.file] } } }),
     );
 
     expect(result).toBeUndefined();
@@ -250,7 +208,7 @@ describe("install hook provider activation", () => {
     fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
 
     const result = await withInstallScanEnv(stateDir, () =>
-      scanPayload({
+      scanInstallPayload({
         plugins: {
           allow: [scanner.id],
           entries: { [scanner.id]: { enabled: true } },
@@ -277,7 +235,7 @@ describe("install hook provider activation", () => {
       },
     };
 
-    const result = await withInstallScanEnv(stateDir, () => scanPayload(config));
+    const result = await withInstallScanEnv(stateDir, () => scanInstallPayload(config));
 
     expect(result?.blocked?.reason).toBe("blocked by context-engine scanner");
     expect(getContextEngineRegistration(contextEngineId)).toBeUndefined();
@@ -316,17 +274,7 @@ describe("install hook provider activation", () => {
         },
       },
     };
-    const result = await withInstallScanEnv(stateDir, () =>
-      evaluateSkillInstallPolicyRuntime({
-        config,
-        workspaceDir,
-        installId: "node",
-        logger: {},
-        origin: { type: "workspace" },
-        skillName: "payload",
-        sourceDir: makeTempDir(),
-      }),
-    );
+    const result = await withInstallScanEnv(stateDir, () => scanSkillInstall(config, workspaceDir));
 
     expect(result).toEqual({
       blocked: {
@@ -369,15 +317,7 @@ describe("install hook provider activation", () => {
         preferPersisted: false,
       });
       expect(targetSnapshot.plugins.map((plugin) => plugin.pluginId)).toContain(scanner.id);
-      return await evaluateSkillInstallPolicyRuntime({
-        config,
-        workspaceDir: targetWorkspaceDir,
-        installId: "node",
-        logger: {},
-        origin: { type: "workspace" },
-        skillName: "payload",
-        sourceDir: makeTempDir(),
-      });
+      return await scanSkillInstall(config, targetWorkspaceDir);
     });
 
     expect(result?.blocked?.reason).toBe("blocked staged target payload");
@@ -422,15 +362,7 @@ describe("install hook provider activation", () => {
         },
       });
       resetPluginLoaderTestStateForTest();
-      return await evaluateSkillInstallPolicyRuntime({
-        config,
-        workspaceDir,
-        installId: "node",
-        logger: {},
-        origin: { type: "workspace" },
-        skillName: "payload",
-        sourceDir: makeTempDir(),
-      });
+      return await scanSkillInstall(config, workspaceDir);
     });
 
     expect(result?.blocked?.reason).toBe("blocked staged target payload");
