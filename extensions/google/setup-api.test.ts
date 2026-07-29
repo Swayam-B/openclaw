@@ -505,6 +505,12 @@ describe("google gemini cli backend auth bridge", () => {
           expect(settings.security?.auth?.selectedType).toBe(
             auth === "oauth" ? "oauth-personal" : auth === "api-key" ? "gemini-api-key" : undefined,
           );
+          if (auth === "ambient") {
+            expect(prepared?.clearEnv).not.toContain("GEMINI_API_KEY");
+            expect(prepared?.clearEnv).not.toContain("GOOGLE_API_KEY");
+          } else {
+            expect(prepared?.clearEnv).toContain("GEMINI_API_KEY");
+          }
         } finally {
           await prepared?.cleanup?.();
         }

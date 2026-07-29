@@ -561,10 +561,10 @@ export function createRuntimeLlm(
         });
       }
 
-      const executionProfile =
-        params.execution?.mode === "isolated-agent-runtime"
-          ? normalizeOptionalString(params.execution.authProfileId)
-          : undefined;
+      const isolatedRequest = isIsolatedAgentRuntimeRequest(params);
+      const executionProfile = isolatedRequest
+        ? normalizeOptionalString(params.execution.authProfileId)
+        : undefined;
       const modelProfile = normalizeOptionalString(selection.profileId);
       if (executionProfile && requestedModelProfile && executionProfile !== requestedModelProfile) {
         throw completionError(
@@ -572,23 +572,22 @@ export function createRuntimeLlm(
           "Isolated completion received conflicting auth profiles in model and execution.authProfileId.",
         );
       }
-      const effectiveProfile = executionProfile ?? modelProfile;
-      // Credential authority follows caller syntax, not the resolver's effective owner.
-      // selection.profileId still drives dispatch after explicit profile permission is checked.
-      assertAllowedAuthProfileOverride({
-        authProfileId: executionProfile ?? requestedModelProfile,
-        authorityPolicy,
-        pluginPolicy,
-      });
 
-      if (isIsolatedAgentRuntimeRequest(params)) {
+      if (isolatedRequest) {
+        // Direct completions preserve the shipped model@profile contract under model
+        // override authority. Isolated credential routing requires separate authority.
+        assertAllowedAuthProfileOverride({
+          authProfileId: executionProfile ?? requestedModelProfile,
+          authorityPolicy,
+          pluginPolicy,
+        });
         const result = await runIsolatedAgentRuntimeCompletion({
           request: params,
           cfg,
           agentId,
           provider: selection.provider,
           model: selection.modelId,
-          authProfileId: effectiveProfile,
+          authProfileId: executionProfile ?? modelProfile,
         });
         const normalizedUsage = normalizeUsage(result.usage as UsageLike | undefined);
         const usage = buildUsage({

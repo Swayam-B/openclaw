@@ -644,7 +644,9 @@ async function prepareGeminiCliRestrictedSystemSettings(
       ...ambientAuth?.envOverrides,
     },
     clearEnv: [
-      ...GEMINI_CLI_PROFILE_AUTH_ENV,
+      // Ordinary exact-tool turns retain the CLI's ambient auth. Isolated turns
+      // clear and restage it into their private home so no host state can leak in.
+      ...(isolated ? GEMINI_CLI_PROFILE_AUTH_ENV : []),
       ...GEMINI_CLI_PROFILE_SETTINGS_ENV,
       ...(isolatedSystemPromptPath
         ? ["GEMINI_SYSTEM_MD", "GEMINI_CLI_HOME", "GEMINI_TELEMETRY_LOG_PROMPTS"]

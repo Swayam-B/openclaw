@@ -38,7 +38,7 @@ export type PluginEntryConfig = {
      * Use "*" to explicitly allow any model for this plugin.
      */
     allowedCompletionModels?: string[];
-    /** Explicitly allow this plugin to select a non-default auth profile for completions. */
+    /** Allow explicit auth-profile selection for isolated agent-runtime completions. */
     allowAuthProfileOverride?: boolean;
     /** Explicitly allow this plugin to run completions against a non-default agent id. */
     allowAgentIdOverride?: boolean;
