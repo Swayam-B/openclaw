@@ -55,10 +55,7 @@ import {
   checkInboundAccessControl,
   type AcceptedInboundAccessControlResult,
 } from "./access-control.js";
-import {
-  requireAdmittedWhatsAppInboundMessage,
-  requireWhatsAppInboundAdmission,
-} from "./admission.js";
+import { requireWhatsAppInboundAdmission } from "./admission.js";
 import { isRecentOutboundMessage, rememberRecentOutboundMessage } from "./dedupe.js";
 import {
   createWhatsAppDurableInboundQueue,
@@ -83,7 +80,7 @@ import { attachEmitterListener, closeInboundMonitorSocket } from "./lifecycle.js
 import { resolveInboundMediaMimetype } from "./media-mimetype.js";
 import { downloadInboundMedia, downloadQuotedInboundMedia } from "./media.js";
 import {
-  normalizeWebInboundMessage,
+  normalizeAdmittedWebInboundMessage,
   withDeprecatedWebInboundMessageFlatAliases,
 } from "./message-aliases.js";
 import {
@@ -96,8 +93,7 @@ import { DisconnectReason, isJidGroup } from "./runtime-api.js";
 import { createWebSendApi } from "./send-api.js";
 import { normalizeWhatsAppSendResult } from "./send-result.js";
 import type {
-  AdmittedWebInboundMessage,
-  WebInboundMessage,
+  AdmittedWebInboundCallbackMessage,
   WebInboundMessageInput,
   WebListenerCloseReason,
 } from "./types.js";
@@ -285,10 +281,6 @@ function shouldClearSocketRefAfterSendFailure(err: unknown): boolean {
   return /closed|reset|disconnect|no active socket/i.test(formatError(err));
 }
 
-type AdmittedWebInboundCallbackMessage = WebInboundMessage & {
-  admission: AdmittedWebInboundMessage["admission"];
-};
-
 type AppendReplyWindow = {
   afterMs: number;
   untilMs: number;
@@ -336,8 +328,13 @@ type MonitorWebInboxOptions = {
   durableInboundQueue?: WhatsAppDurableInboundQueue;
 };
 
-type AttachWebInboxToSocketOptions = Omit<MonitorWebInboxOptions, "socketTiming"> & {
+type AttachWebInboxToSocketOptions = Omit<
+  MonitorWebInboxOptions,
+  "onMessage" | "shouldDebounce" | "socketTiming"
+> & {
   socketTiming: Required<WhatsAppSocketTimingOptions>;
+  onMessage: (msg: WebInboundMessageInput) => Promise<void>;
+  shouldDebounce?: (msg: WebInboundMessageInput) => boolean;
 };
 
 export async function attachWebInboxToSocket(
@@ -1896,12 +1893,6 @@ export async function monitorWebInbox(options: MonitorWebInboxOptions) {
     throw err;
   }
   const shouldDebounce = options.shouldDebounce;
-  const normalizeAdmittedWebInboundMessage = (
-    msg: WebInboundMessageInput,
-  ): AdmittedWebInboundCallbackMessage =>
-    requireAdmittedWhatsAppInboundMessage(
-      normalizeWebInboundMessage(msg),
-    ) as AdmittedWebInboundCallbackMessage;
   return attachWebInboxToSocket({
     ...options,
     onMessage: async (msg) => {
