@@ -17,6 +17,7 @@ import type {
 } from "./manifest.js";
 import type { PluginOrigin } from "./plugin-origin.types.js";
 import { loadPluginManifestRegistryForPluginRegistry } from "./plugin-registry-contributions.js";
+import type { PluginRegistrySnapshot } from "./plugin-registry-snapshot.js";
 import { createPluginIdScopeSet, normalizePluginIdScope } from "./plugin-scope.js";
 
 /** Runtime surface that can request a lazily activated plugin owner. */
@@ -71,6 +72,7 @@ type ResolveManifestActivationPlanParams = {
   origin?: PluginOrigin;
   onlyPluginIds?: readonly string[];
   manifestRecords?: readonly PluginManifestRecord[];
+  index?: PluginRegistrySnapshot;
   preferPersisted?: boolean;
   allowRestrictiveAllowlistBypass?: boolean;
   requireExplicitManifestOwnerTrust?: boolean;
@@ -87,6 +89,7 @@ export function resolveManifestActivationPlan(
         config: params.config,
         workspaceDir: params.workspaceDir,
         env: params.env,
+        index: params.index,
         pluginIds: params.onlyPluginIds,
         includeDisabled: true,
         preferPersisted: params.preferPersisted,

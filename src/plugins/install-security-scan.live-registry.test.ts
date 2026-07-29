@@ -485,6 +485,61 @@ describe("live install hook provider registries", () => {
     expect(result?.blocked?.reason).toBe("current symlink target");
   });
 
+  it("does not reuse hook ownership after a configured symlink is retargeted", async () => {
+    useNoBundledPlugins();
+    const stateDir = makeTempDir();
+    const workspaceDir = makeTempDir();
+    const scannerId = "removed-symlink-hook-scanner";
+    const scannerA = writeLabeledBeforeInstallBlocker(
+      scannerId,
+      path.join(makeTempDir(), "scanner-a"),
+      "old declared scanner",
+    );
+    const scannerB = writeLabeledBeforeInstallBlocker(
+      scannerId,
+      path.join(makeTempDir(), "scanner-b"),
+      "current undeclared scanner",
+      { activationHint: false },
+    );
+    const linkPath = path.join(makeTempDir(), "scanner-link");
+    fs.symlinkSync(scannerA.dir, linkPath, "dir");
+    const config = {
+      agents: { defaults: { workspace: workspaceDir } },
+      plugins: {
+        load: { paths: [linkPath] },
+      },
+    };
+
+    const [firstResult, secondResult] = await withEnvAsync(
+      {
+        OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+        OPENCLAW_STATE_DIR: stateDir,
+      },
+      async () => {
+        const first = await scanFileInstallSourceRuntime({
+          config,
+          filePath: path.join(makeTempDir(), "first.js"),
+          logger: {},
+          pluginId: "first",
+        });
+        fs.unlinkSync(linkPath);
+        fs.symlinkSync(scannerB.dir, linkPath, "dir");
+        return [
+          first,
+          await scanFileInstallSourceRuntime({
+            config,
+            filePath: path.join(makeTempDir(), "second.js"),
+            logger: {},
+            pluginId: "second",
+          }),
+        ];
+      },
+    );
+
+    expect(firstResult?.blocked?.reason).toBe("old declared scanner");
+    expect(secondResult).toBeUndefined();
+  });
+
   it("fully loads a hook provider that is active only through a hookless setup runtime", async () => {
     useNoBundledPlugins();
     const stateDir = makeTempDir();

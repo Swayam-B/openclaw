@@ -425,6 +425,7 @@ describe("legacy file install scan compatibility", () => {
 
     expect(resolveManifestActivationPlanMock).toHaveBeenCalledWith({
       config,
+      index: { diagnostics: [], plugins: [] },
       workspaceDir: expect.any(String),
       onlyPluginIds: ["scanner-a", "scanner-b"],
       preferPersisted: false,

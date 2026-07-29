@@ -1179,6 +1179,7 @@ async function runBeforeInstallHook(params: {
       const activationPlan = resolveManifestActivationPlan({
         config,
         workspaceDir,
+        index: pluginIndex,
         onlyPluginIds: explicitlyEnabledPluginIds,
         preferPersisted: false,
         requireExplicitManifestOwnerTrust: true,
