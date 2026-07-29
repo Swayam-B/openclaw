@@ -108,7 +108,9 @@ export function buildCodexUserMcpServersThreadConfigPatch(
   if (entries.length === 0) {
     return undefined;
   }
-  const mcp_servers: CodexThreadConfigObject = {};
+  // Collected as entries: a server literally named `__proto__` would hit the
+  // prototype setter under plain assignment and vanish from the patch.
+  const projected: [string, CodexThreadConfigObject][] = [];
   for (const [name, server] of entries) {
     const serverOverride = readSessionMcpServerOverride(options, name);
     if (serverOverride === false || (serverOverride !== true && server.enabled === false)) {
@@ -117,11 +119,15 @@ export function buildCodexUserMcpServersThreadConfigPatch(
     if (!isCodexMcpServerAllowedForAgent(server as BundleMcpServerConfig, options)) {
       continue;
     }
-    mcp_servers[name] = normalizeCodexMcpServerConfig(
+    projected.push([
       name,
-      applyCodexSessionMcpToolDenials(name, server, options?.toolOverrides),
-    ) as CodexThreadConfigObject;
+      normalizeCodexMcpServerConfig(
+        name,
+        applyCodexSessionMcpToolDenials(name, server, options?.toolOverrides),
+      ) as CodexThreadConfigObject,
+    ]);
   }
+  const mcp_servers: CodexThreadConfigObject = Object.fromEntries(projected);
   if (Object.keys(mcp_servers).length === 0) {
     return undefined;
   }
@@ -180,12 +186,14 @@ export async function buildCodexUserMcpServersThreadConfigPatchForRuntime(
     omitUnavailableOAuthServers: true,
     onServerUnavailable: options?.onServerUnavailable,
   });
-  const mcp_servers: CodexThreadConfigObject = {};
-  for (const [name, server] of Object.entries(resolvedConfig.config.mcpServers)) {
-    mcp_servers[name] = normalizeCodexMcpServerConfig(
+  const mcp_servers: CodexThreadConfigObject = Object.fromEntries(
+    Object.entries(resolvedConfig.config.mcpServers).map(([name, server]) => [
       name,
-      applyCodexSessionMcpToolDenials(name, server, options?.toolOverrides),
-    ) as CodexThreadConfigObject;
-  }
+      normalizeCodexMcpServerConfig(
+        name,
+        applyCodexSessionMcpToolDenials(name, server, options?.toolOverrides),
+      ) as CodexThreadConfigObject,
+    ]),
+  );
   return Object.keys(mcp_servers).length === 0 ? undefined : { mcp_servers };
 }
