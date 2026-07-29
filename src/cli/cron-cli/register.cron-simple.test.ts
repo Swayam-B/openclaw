@@ -35,8 +35,8 @@ function mockCronShowPages(readPage: (params: { offset?: number }) => unknown): 
   callGatewayFromCli.mockImplementation(
     async (method: string, _opts: unknown, params?: { id?: string; offset?: number }) => {
       if (method === "cron.get") {
-        // Deliberately the pre-rename message: older gateways still emit it and
-        // the CLI matcher must keep recognizing that form.
+        // Mirrors the gateway's stable wire wording; older shipped CLI matchers
+        // parse exactly this form, so the server must not reword it.
         throw Object.assign(new Error(`cron job not found: ${params?.id ?? ""}`), {
           name: "GatewayClientRequestError",
           gatewayCode: "INVALID_REQUEST",
