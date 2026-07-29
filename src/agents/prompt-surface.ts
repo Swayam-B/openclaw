@@ -25,7 +25,7 @@ export function buildOpenClawToolFallbackText(params: {
       "- browser: control OpenClaw's dedicated browser",
       "- canvas: present/eval/snapshot the Canvas",
       "- nodes: list/describe/notify/camera/screen on paired nodes",
-      "- cron: manage cron jobs and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate)",
+      "- automations: manage automations (scheduled jobs) and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate)",
       "- conversations_list: list exact external conversation addresses",
       "- conversations_send: send directly to an external conversation",
       "- conversations_turn: send and wait for a correlated external reply",
