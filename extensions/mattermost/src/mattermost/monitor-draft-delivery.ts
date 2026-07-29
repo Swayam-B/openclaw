@@ -8,6 +8,7 @@ import {
   defineFinalizableLivePreviewAdapter,
   deliverWithFinalizableLivePreviewAdapter,
   listMessageReceiptPlatformIds,
+  type MessageReceipt,
 } from "openclaw/plugin-sdk/channel-outbound";
 import {
   buildTtsSupplementMediaPayload,
@@ -169,13 +170,34 @@ export async function deliverMattermostReplyWithDraftPreview(
       content: previewDeliveryResult.content,
     };
   } catch (error: unknown) {
-    if (!previewDeliveryResult?.receipt) {
+    // A provider send can complete before preview cleanup fails. Preserve every
+    // completed visible receipt so core cannot mistake that post-send failure for a safe retry.
+    const completedVisibleResults: MattermostReplyDeliveryResult[] = [];
+    const completedReceiptResults: Array<{ receipt: MessageReceipt } | { messageId: string }> = [];
+    for (const result of [
+      previewDeliveryResult,
+      normalDeliveryResult,
+      supplementalDeliveryResult,
+    ]) {
+      if (result?.visibleReplySent !== true) {
+        continue;
+      }
+      completedVisibleResults.push(result);
+      if (result.receipt) {
+        completedReceiptResults.push({ receipt: result.receipt });
+      } else {
+        completedReceiptResults.push(
+          ...(result.messageIds ?? []).map((messageId) => ({ messageId })),
+        );
+      }
+    }
+    if (completedVisibleResults.length === 0) {
       throw error;
     }
     const failedPartial = isChannelPartialDeliveryError(error) ? error.deliveryResult : undefined;
     const receipt = createMessageReceiptFromOutboundResults({
       results: [
-        { receipt: previewDeliveryResult.receipt },
+        ...completedReceiptResults,
         ...(failedPartial?.receipt
           ? [{ receipt: failedPartial.receipt }]
           : (failedPartial?.messageIds ?? []).map((messageId) => ({ messageId }))),
@@ -185,7 +207,11 @@ export async function deliverMattermostReplyWithDraftPreview(
       messageIds: listMessageReceiptPlatformIds(receipt),
       receipt,
       visibleReplySent: true,
-      content: previewDeliveryResult.content ?? "",
+      content:
+        previewDeliveryResult?.content ??
+        normalDeliveryResult?.content ??
+        supplementalDeliveryResult?.content ??
+        "",
     });
   }
 }

@@ -429,6 +429,41 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
     expect(updateMattermostPostSpy).not.toHaveBeenCalled();
   });
 
+  it("preserves a completed normal send when preview cleanup fails", async () => {
+    const draftStream = createDraftStreamMock();
+    draftStream.clear.mockRejectedValueOnce(new Error("preview cleanup failed"));
+    const deliverFinal = createDeliverFinalMock();
+
+    let caught: unknown;
+    try {
+      await deliverMattermostReplyWithDraftPreview({
+        payload: { text: "Already visible", replyToId: "reply-1" } as never,
+        info: { kind: "final" },
+        kind: "channel",
+        client: createMattermostClientMock(),
+        draftStream,
+        resolvePreviewFinalText: (text) => text?.trim(),
+        previewState: { finalizedViaPreviewPost: false },
+        logVerboseMessage: vi.fn(),
+        deliverPayload: deliverFinal,
+      });
+    } catch (error: unknown) {
+      caught = error;
+    }
+
+    expect(isChannelPartialDeliveryError(caught)).toBe(true);
+    if (!isChannelPartialDeliveryError(caught)) {
+      throw new Error("expected a partial Mattermost preview delivery error");
+    }
+    expect(caught.deliveryResult).toMatchObject({
+      messageIds: ["delivered-post-1"],
+      visibleReplySent: true,
+      content: "Already visible",
+    });
+    expect(deliverFinal).toHaveBeenCalledTimes(1);
+    expect(draftStream.clear).toHaveBeenCalledTimes(1);
+  });
+
   it("deletes the preview after a successful non-finalizable media final", async () => {
     const draftStream = createDraftStreamMock();
     const deliverFinal = createDeliverFinalMock();
