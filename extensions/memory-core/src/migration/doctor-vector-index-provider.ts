@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import type { PluginDoctorStateMigration } from "openclaw/plugin-sdk/runtime-doctor";
+import { openNodeSqliteDatabase } from "openclaw/plugin-sdk/sqlite-runtime";
 
 const MEMORY_INDEX_META_KEY = "memory_index_meta_v1";
 
@@ -89,9 +89,9 @@ function readExistingVectorModel(databasePath: string): string | null {
   if (!fs.existsSync(databasePath)) {
     return null;
   }
-  let db: DatabaseSync | undefined;
+  let db: ReturnType<typeof openNodeSqliteDatabase> | undefined;
   try {
-    db = new DatabaseSync(databasePath, { readOnly: true });
+    db = openNodeSqliteDatabase(databasePath, { readOnly: true });
     const row = db
       .prepare("SELECT value FROM memory_index_meta WHERE key = ?")
       .get(MEMORY_INDEX_META_KEY) as { value?: unknown } | undefined;
