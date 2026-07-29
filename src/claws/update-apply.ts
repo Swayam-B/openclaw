@@ -11,6 +11,10 @@ import {
   type ClawCronUpdateExecution,
 } from "./cron-update.js";
 import type { ClawCronGateway } from "./cron.js";
+import {
+  CLAW_EXTENSION_MUTATION_UNAVAILABLE_MESSAGE,
+  hasClawProfileExtensions,
+} from "./extension-mutation-guard.js";
 import { buildClawAddPlan, type ClawAddPlanContext } from "./lifecycle.js";
 import {
   applyClawMcpUpdate,
@@ -136,6 +140,12 @@ export async function applyClawUpdatePlan(
     throw new ClawUpdateMutationError(
       "update_blocked",
       "The Claw update plan contains blockers or manual actions.",
+    );
+  }
+  if (hasClawProfileExtensions(params.targetOpenClawProfile)) {
+    throw new ClawUpdateMutationError(
+      "extension_mutation_unavailable",
+      CLAW_EXTENSION_MUTATION_UNAVAILABLE_MESSAGE,
     );
   }
 

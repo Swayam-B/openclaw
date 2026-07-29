@@ -19,6 +19,7 @@ import {
   type ClawCronGateway,
   type PersistedClawCronRef,
 } from "./cron.js";
+import { CLAW_EXTENSION_MUTATION_UNAVAILABLE_MESSAGE } from "./extension-mutation-guard.js";
 import {
   ClawMcpInstallError,
   installClawMcpServers,
@@ -211,6 +212,12 @@ export async function applyClawAddPlan(
     throw new ClawAddMutationError(
       "plan_integrity_mismatch",
       "Consent does not match the current Claw add plan; run add --dry-run again.",
+    );
+  }
+  if (plan.extensions.length > 0) {
+    throw new ClawAddMutationError(
+      "extension_mutation_unavailable",
+      CLAW_EXTENSION_MUTATION_UNAVAILABLE_MESSAGE,
     );
   }
   if (plan.manifestSchemaVersion === CLAW_SETUP_SCHEMA_VERSION && !options.setupMaterialization) {
