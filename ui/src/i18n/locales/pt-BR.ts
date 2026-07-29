@@ -2292,6 +2292,10 @@ export const pt_BR: TranslationMap = {
     nameInvalid: "Nomes de servidores usam letras, números, pontos, traços ou sublinhados.",
     targetInvalid:
       "Insira uma URL para transportes HTTP ou uma linha de comando válida para stdio.",
+    sessionEnableFailed:
+      "O servidor foi salvo desativado globalmente, mas a ativação para esta sessão falhou: {error}",
+    sessionChanged: "A sessão ativa foi alterada antes de poder ser ativada.",
+    sessionUnavailable: "A sessão ativa está indisponível; atualize e tente novamente.",
     nameTaken: "Já existe um servidor MCP chamado “{name}”.",
     missing: "O servidor MCP “{name}” não foi encontrado na configuração.",
     missingTransport: "transporte ausente",
@@ -2461,7 +2465,9 @@ export const pt_BR: TranslationMap = {
       description:
         "Exatamente um plugin de memória ocupa o slot de memória. Selecionar um motor o ativa e desativa os outros.",
       rowTitle: "Motor de memória",
+      openClawMemory: "OpenClaw Memory",
       off: "Desativado",
+      unavailable: "Indisponível",
       autoHint:
         "Nenhum motor está fixado na configuração, então o slot recai sobre seu proprietário padrão.",
       explicitHint: "Este motor está fixado na configuração em plugins.slots.memory.",
@@ -2775,6 +2781,11 @@ export const pt_BR: TranslationMap = {
       title: "Busca de ferramentas",
       description:
         "Mantenha um diretório de ferramentas limitado visível e adie o restante atrás da busca, para que grandes catálogos de MCP e plugins parem de sobrecarregar o prompt.",
+    },
+    loopDetection: {
+      title: "Detecção de loop de ferramentas",
+      description:
+        "Ative proteções de histórico contínuo que avisam ou bloqueiam chamadas repetidas de ferramentas quando um agente para de progredir.",
     },
     localModelLean: {
       title: "Ferramentas enxutas para modelos locais",
@@ -3810,12 +3821,12 @@ export const pt_BR: TranslationMap = {
       loadingPage: "Carregando página wiki…",
       dreamsTab: "Sonhos",
       insightsTab: "Insights Importados",
-      palaceTab: "Palácio da Memória",
+      wikiTab: "Wiki de Memória",
       dreamsExplainer:
         "Este é o diário de sonhos bruto que o sistema escreve enquanto reproduz e consolida a memória; use-o para inspecionar o que o sistema de memória está percebendo e onde ainda parece ruidoso ou insuficiente.",
       insightsExplainer:
         "Estes são insights importados agrupados a partir do histórico externo; use-os para revisar o que as importações revelaram antes que qualquer parte se transforme em memória duradoura.",
-      palaceExplainer:
+      wikiExplainer:
         "Esta é a superfície da wiki de memória compilada que o sistema pode pesquisar e sobre a qual pode raciocinar; use-a para inspecionar páginas de memória reais, afirmações, questões em aberto e contradições, em vez de conversas de origem importadas brutas.",
       copyArchivePath: "Copiar caminho do arquivo",
       loadingInsights: "Carregando insights importados…",
@@ -3831,9 +3842,9 @@ export const pt_BR: TranslationMap = {
       riskReasons: "Motivos de risco:",
       labels: "Rótulos:",
       openSourcePage: "Abrir página de origem",
-      loadingPalace: "Carregando palácio da memória…",
-      emptyPalace: "O palácio da memória ainda não foi preenchido",
-      emptyPalaceHint:
+      loadingWiki: "Carregando wiki de memória…",
+      emptyWiki: "A wiki de memória ainda não foi preenchida",
+      emptyWikiHint:
         "No momento, a wiki tem principalmente importações de fontes brutas e relatórios operacionais. Esta aba se torna útil quando sínteses, entidades ou conceitos começam a ser escritos.",
       claims: "Afirmações",
       openQuestions: "Perguntas em aberto",
@@ -3911,7 +3922,7 @@ export const pt_BR: TranslationMap = {
       tidyingKnowledgeGraph: "organizando o grafo de conhecimento…",
       replayingConversations: "repassando as conversas de hoje…",
       weavingShortTerm: "entrelaçando o curto prazo com o longo prazo…",
-      defragmentingMindPalace: "desfragmentando o palácio mental…",
+      defragmentingMemoryLane: "desfragmentando os caminhos da memória…",
       filingLooseThoughts: "arquivando pensamentos soltos…",
       connectingDots: "conectando pontos distantes…",
       compostingContext: "compostando janelas de contexto antigas…",
@@ -5117,7 +5128,22 @@ export const pt_BR: TranslationMap = {
         manageSkills: "Gerenciar Skills",
         browseConnectors: "Explorar conectores",
         addMcpServer: "Adicionar servidor MCP…",
-        toolAccess: "Acesso a ferramentas",
+        addMcpServerTitle: "Adicionar servidor MCP",
+        addMcpServerDescription: "Configure o servidor e escolha onde ele fica ativado.",
+        scopeLabel: "Disponibilidade",
+        scopeSession: "Esta sessão",
+        scopeEverywhere: "Em todos os lugares",
+        scopeSessionHint:
+          "O servidor é salvo desativado globalmente e ativado apenas para esta sessão.",
+        scopeEverywhereHint: "O servidor é salvo e ativado para todas as sessões.",
+        toolAccess: {
+          label: "Acesso a ferramentas",
+          loading: "Carregando ferramentas…",
+          loadFailed: "Não foi possível carregar as ferramentas.",
+          noTools: "Nenhuma ferramenta disponível para este conector.",
+          summary: "{enabled} de {total} ferramentas ativadas",
+          summaryOne: "{enabled} de {total} ferramenta ativada",
+        },
         enabledCount: "{count} ativos",
         loadingSkills: "Carregando Skills…",
         skillsLoadFailed: "Não foi possível carregar as Skills.",

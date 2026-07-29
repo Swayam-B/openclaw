@@ -2293,6 +2293,10 @@ export const ja_JP: TranslationMap = {
     nameInvalid: "サーバー名には英字、数字、ドット、ダッシュ、またはアンダースコアを使用します。",
     targetInvalid:
       "HTTP トランスポートの場合は URL を、stdio の場合は有効なコマンドラインを入力してください。",
+    sessionEnableFailed:
+      "サーバーはグローバルに無効として保存されましたが、このセッションで有効にできませんでした: {error}",
+    sessionChanged: "有効にする前にアクティブなセッションが変更されました。",
+    sessionUnavailable: "アクティブなセッションが利用できません。更新して再試行してください。",
     nameTaken: "「{name}」という名前の MCP サーバーは既に存在します。",
     missing: "MCP サーバー「{name}」が設定内に見つかりませんでした。",
     missingTransport: "トランスポートがありません",
@@ -2459,7 +2463,9 @@ export const ja_JP: TranslationMap = {
       description:
         "メモリスロットを所有できるメモリプラグインは常に1つだけです。エンジンを選択すると、それが有効になり、他は無効になります。",
       rowTitle: "メモリエンジン",
+      openClawMemory: "OpenClaw Memory",
       off: "オフ",
+      unavailable: "利用不可",
       autoHint:
         "設定でエンジンが固定されていないため、スロットは既定の所有者にフォールバックします。",
       explicitHint: "このエンジンは plugins.slots.memory の設定で固定されています。",
@@ -2766,6 +2772,11 @@ export const ja_JP: TranslationMap = {
       title: "ツール検索",
       description:
         "限定されたツールディレクトリを表示し、残りは検索の背後に遅延させることで、大規模なMCPおよびプラグインカタログがプロンプトを圧迫しないようにします。",
+    },
+    loopDetection: {
+      title: "ツールループ検出",
+      description:
+        "エージェントが進捗しなくなったときに、繰り返されるツール呼び出しを警告またはブロックするローリング履歴ガードを有効にします。",
     },
     localModelLean: {
       title: "ローカルモデル向けの軽量ツール",
@@ -3801,12 +3812,12 @@ export const ja_JP: TranslationMap = {
       loadingPage: "wikiページを読み込み中…",
       dreamsTab: "ドリーム",
       insightsTab: "インポートされたインサイト",
-      palaceTab: "メモリーパレス",
+      wikiTab: "メモリ Wiki",
       dreamsExplainer:
         "これは、システムがメモリを再生・統合しながら書き込む生のドリーム日記です。メモリシステムが何に気づいているか、また、どこがまだノイズが多いか希薄に見えるかを調べるのに使用します。",
       insightsExplainer:
         "これらは外部履歴からクラスタリングされてインポートされたインサイトです。いずれかが永続的なメモリに昇格する前に、インポートが何を表面化させたかを確認するのに使用します。",
-      palaceExplainer:
+      wikiExplainer:
         "これは、システムが検索・推論できるコンパイル済みのメモリwikiサーフェスです。生のインポート元チャットではなく、実際のメモリページ、主張、未解決の質問、矛盾を調べるのに使用します。",
       copyArchivePath: "アーカイブパスをコピー",
       loadingInsights: "インポートされたインサイトを読み込み中…",
@@ -3822,9 +3833,9 @@ export const ja_JP: TranslationMap = {
       riskReasons: "リスクの理由:",
       labels: "ラベル:",
       openSourcePage: "ソースページを開く",
-      loadingPalace: "メモリーパレスを読み込み中…",
-      emptyPalace: "メモリーパレスにはまだデータがありません",
-      emptyPalaceHint:
+      loadingWiki: "メモリ Wiki を読み込んでいます…",
+      emptyWiki: "メモリ Wiki はまだ作成されていません",
+      emptyWikiHint:
         "現在、このwikiには主に生のソースインポートと運用レポートのみが含まれています。統合・エンティティ・概念が書き込まれ始めると、このタブが役立つようになります。",
       claims: "主張",
       openQuestions: "未解決の質問",
@@ -3900,7 +3911,7 @@ export const ja_JP: TranslationMap = {
       tidyingKnowledgeGraph: "ナレッジグラフを整頓中…",
       replayingConversations: "今日の会話を再生中…",
       weavingShortTerm: "短期記憶を長期記憶に織り込み中…",
-      defragmentingMindPalace: "マインドパレスをデフラグ中…",
+      defragmentingMemoryLane: "記憶の小道をデフラグ中…",
       filingLooseThoughts: "散らばった思考を整理中…",
       connectingDots: "離れた点をつなぎ合わせ中…",
       compostingContext: "古いコンテキストウィンドウを堆肥化中…",
@@ -5105,7 +5116,22 @@ export const ja_JP: TranslationMap = {
         manageSkills: "Skills を管理",
         browseConnectors: "コネクタを参照",
         addMcpServer: "MCP サーバーを追加…",
-        toolAccess: "ツールアクセス",
+        addMcpServerTitle: "MCP サーバーを追加",
+        addMcpServerDescription: "サーバーを構成し、有効にする場所を選択します。",
+        scopeLabel: "利用範囲",
+        scopeSession: "このセッション",
+        scopeEverywhere: "すべての場所",
+        scopeSessionHint:
+          "サーバーはグローバルに無効として保存され、このセッションでのみ有効になります。",
+        scopeEverywhereHint: "サーバーは保存され、すべてのセッションで有効になります。",
+        toolAccess: {
+          label: "ツールアクセス",
+          loading: "ツールを読み込んでいます…",
+          loadFailed: "ツールを読み込めませんでした。",
+          noTools: "このコネクタで利用できるツールはありません。",
+          summary: "{total}個中{enabled}個のツールが有効",
+          summaryOne: "{total}個中{enabled}個のツールが有効",
+        },
         enabledCount: "{count} 個有効",
         loadingSkills: "Skills を読み込み中…",
         skillsLoadFailed: "Skills を読み込めませんでした。",

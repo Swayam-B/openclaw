@@ -2294,6 +2294,10 @@ export const nl: TranslationMap = {
     targetLabel: "URL of opdracht",
     nameInvalid: "Servernamen gebruiken letters, cijfers, punten, streepjes of underscores.",
     targetInvalid: "Voer een URL in voor HTTP-transporten of een geldige opdrachtregel voor stdio.",
+    sessionEnableFailed:
+      "De server is globaal uitgeschakeld opgeslagen, maar het inschakelen voor deze sessie is mislukt: {error}",
+    sessionChanged: "De actieve sessie is gewijzigd voordat deze kon worden ingeschakeld.",
+    sessionUnavailable: "De actieve sessie is niet beschikbaar; vernieuw en probeer het opnieuw.",
     nameTaken: "Er bestaat al een MCP-server met de naam “{name}”.",
     missing: "MCP-server “{name}” is niet gevonden in de configuratie.",
     missingTransport: "transport ontbreekt",
@@ -2464,7 +2468,9 @@ export const nl: TranslationMap = {
       description:
         "Precies één geheugenplug-in bezit de geheugenslot. Een engine selecteren schakelt deze in en de andere uit.",
       rowTitle: "Geheugenengine",
+      openClawMemory: "OpenClaw Memory",
       off: "Uit",
+      unavailable: "Niet beschikbaar",
       autoHint:
         "Er is geen engine vastgezet in de configuratie, dus de slot valt terug op de standaardeigenaar.",
       explicitHint: "Deze engine is vastgezet in de config onder plugins.slots.memory.",
@@ -2775,6 +2781,11 @@ export const nl: TranslationMap = {
       title: "Tool Search",
       description:
         "Houd een begrensde toolmap zichtbaar en stel de rest uit achter zoeken, zodat grote MCP- en plugincatalogi de prompt niet langer overspoelen.",
+    },
+    loopDetection: {
+      title: "Detectie van tool-loops",
+      description:
+        "Schakel bescherming op basis van doorlopende geschiedenis in die waarschuwt bij of blokkeert herhaalde toolaanroepen wanneer een agent geen voortgang meer maakt.",
     },
     localModelLean: {
       title: "Slanke tools voor lokale modellen",
@@ -3811,12 +3822,12 @@ export const nl: TranslationMap = {
       loadingPage: "Wiki-pagina laden…",
       dreamsTab: "Dromen",
       insightsTab: "Geïmporteerde inzichten",
-      palaceTab: "Memory Palace",
+      wikiTab: "Geheugen-wiki",
       dreamsExplainer:
         "Dit is het ruwe droomdagboek dat het systeem schrijft tijdens het opnieuw afspelen en consolideren van geheugen; gebruik het om te inspecteren wat het geheugensysteem opmerkt en waar het nog rommelig of dun oogt.",
       insightsExplainer:
         "Dit zijn geïmporteerde inzichten die zijn geclusterd uit externe geschiedenis; gebruik ze om te bekijken wat imports naar boven brachten voordat iets ervan doorgroeit naar duurzaam geheugen.",
-      palaceExplainer:
+      wikiExplainer:
         "Dit is het gecompileerde geheugenwiki-oppervlak dat het systeem kan doorzoeken en waarover het kan redeneren; gebruik het om echte geheugenpagina's, beweringen, openstaande vragen en tegenstrijdigheden te inspecteren in plaats van ruwe geïmporteerde bronchats.",
       copyArchivePath: "Archiefpad kopiëren",
       loadingInsights: "Geïmporteerde inzichten laden…",
@@ -3832,9 +3843,9 @@ export const nl: TranslationMap = {
       riskReasons: "Risicoredenen:",
       labels: "Labels:",
       openSourcePage: "Bronpagina openen",
-      loadingPalace: "Geheugenpaleis laden…",
-      emptyPalace: "Geheugenpaleis is nog niet gevuld",
-      emptyPalaceHint:
+      loadingWiki: "Geheugen-wiki laden…",
+      emptyWiki: "Geheugen-wiki is nog niet gevuld",
+      emptyWikiHint:
         "Op dit moment bevat de wiki vooral ruwe bronimports en operationele rapporten. Dit tabblad wordt nuttig zodra syntheses, entiteiten of concepten worden geschreven.",
       claims: "Beweringen",
       openQuestions: "Openstaande vragen",
@@ -3913,7 +3924,7 @@ export const nl: TranslationMap = {
       tidyingKnowledgeGraph: "de kennisgrafiek opruimen…",
       replayingConversations: "gesprekken van vandaag opnieuw afspelen…",
       weavingShortTerm: "kortetermijn in langetermijn verweven…",
-      defragmentingMindPalace: "het mind palace defragmenteren…",
+      defragmentingMemoryLane: "geheugenpaadje defragmenteren…",
       filingLooseThoughts: "losse gedachten opbergen…",
       connectingDots: "verre punten verbinden…",
       compostingContext: "oude contextvensters composteren…",
@@ -5119,7 +5130,22 @@ export const nl: TranslationMap = {
         manageSkills: "Skills beheren",
         browseConnectors: "Connectors doorbladeren",
         addMcpServer: "MCP-server toevoegen…",
-        toolAccess: "Toegang tot tools",
+        addMcpServerTitle: "MCP-server toevoegen",
+        addMcpServerDescription: "Configureer de server en kies waar deze wordt ingeschakeld.",
+        scopeLabel: "Beschikbaarheid",
+        scopeSession: "Deze sessie",
+        scopeEverywhere: "Overal",
+        scopeSessionHint:
+          "De server wordt globaal uitgeschakeld opgeslagen en alleen voor deze sessie ingeschakeld.",
+        scopeEverywhereHint: "De server wordt opgeslagen en ingeschakeld voor elke sessie.",
+        toolAccess: {
+          label: "Toegang tot tools",
+          loading: "Tools laden…",
+          loadFailed: "Kon tools niet laden.",
+          noTools: "Geen tools beschikbaar voor deze connector.",
+          summary: "{enabled} van {total} tools aan",
+          summaryOne: "{enabled} van {total} tool aan",
+        },
         enabledCount: "{count} aan",
         loadingSkills: "Skills laden…",
         skillsLoadFailed: "Kan Skills niet laden.",

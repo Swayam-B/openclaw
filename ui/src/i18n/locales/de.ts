@@ -2311,6 +2311,11 @@ export const de: TranslationMap = {
       "Servernamen verwenden Buchstaben, Zahlen, Punkte, Bindestriche oder Unterstriche.",
     targetInvalid:
       "Geben Sie eine URL für HTTP-Transporte oder eine gültige Befehlszeile für Stdio ein.",
+    sessionEnableFailed:
+      "Der Server wurde global deaktiviert gespeichert, aber die Aktivierung für diese Sitzung ist fehlgeschlagen: {error}",
+    sessionChanged: "Die aktive Sitzung hat sich geändert, bevor sie aktiviert werden konnte.",
+    sessionUnavailable:
+      "Die aktive Sitzung ist nicht verfügbar; aktualisieren und erneut versuchen.",
     nameTaken: "Ein MCP-Server mit dem Namen „{name}“ existiert bereits.",
     missing: "MCP-Server „{name}“ wurde in der Konfiguration nicht gefunden.",
     missingTransport: "fehlender Transport",
@@ -2481,7 +2486,9 @@ export const de: TranslationMap = {
       description:
         "Genau ein Memory-Plugin belegt den Memory-Slot. Beim Auswählen einer Engine wird diese aktiviert und die anderen deaktiviert.",
       rowTitle: "Memory-Engine",
+      openClawMemory: "OpenClaw Memory",
       off: "Aus",
+      unavailable: "Nicht verfügbar",
       autoHint:
         "In der Konfiguration ist keine Engine fixiert, daher fällt der Slot auf seinen Standard-Besitzer zurück.",
       explicitHint: "Diese Engine ist in der Konfiguration unter plugins.slots.memory fixiert.",
@@ -2803,6 +2810,11 @@ export const de: TranslationMap = {
       title: "Tool-Suche",
       description:
         "Halten Sie ein begrenztes Tool-Verzeichnis sichtbar und verschieben Sie den Rest hinter die Suche, damit große MCP- und Plugin-Kataloge den Prompt nicht mehr überfüllen.",
+    },
+    loopDetection: {
+      title: "Tool-Loop-Erkennung",
+      description:
+        "Aktiviere Schutzmechanismen mit fortlaufender Verlaufsprüfung, die vor wiederholten Tool-Aufrufen warnen oder sie blockieren, wenn ein Agent keine Fortschritte mehr macht.",
     },
     localModelLean: {
       title: "Schlanke Tools für lokale Modelle",
@@ -3843,12 +3855,12 @@ export const de: TranslationMap = {
       loadingPage: "Wiki-Seite wird geladen…",
       dreamsTab: "Träume",
       insightsTab: "Importierte Erkenntnisse",
-      palaceTab: "Gedächtnispalast",
+      wikiTab: "Memory-Wiki",
       dreamsExplainer:
         "Dies ist das rohe Traumtagebuch, das das System beim Wiedergeben und Konsolidieren des Gedächtnisses schreibt; nutze es, um zu überprüfen, was das Gedächtnissystem bemerkt und wo es noch verrauscht oder dünn wirkt.",
       insightsExplainer:
         "Dies sind importierte Erkenntnisse, die aus externem Verlauf geclustert wurden; nutze sie, um zu prüfen, was Importe aufgedeckt haben, bevor etwas davon zu dauerhaftem Gedächtnis wird.",
-      palaceExplainer:
+      wikiExplainer:
         "Dies ist die kompilierte Gedächtnis-Wiki-Fläche, die das System durchsuchen und verarbeiten kann; nutze sie, um tatsächliche Gedächtnisseiten, Aussagen, offene Fragen und Widersprüche zu untersuchen statt roher importierter Quell-Chats.",
       copyArchivePath: "Archivpfad kopieren",
       loadingInsights: "Importierte Erkenntnisse werden geladen…",
@@ -3864,9 +3876,9 @@ export const de: TranslationMap = {
       riskReasons: "Risikogründe:",
       labels: "Labels:",
       openSourcePage: "Quellseite öffnen",
-      loadingPalace: "Gedächtnispalast wird geladen…",
-      emptyPalace: "Der Gedächtnispalast ist noch nicht befüllt",
-      emptyPalaceHint:
+      loadingWiki: "Memory-Wiki wird geladen…",
+      emptyWiki: "Memory-Wiki ist noch nicht befüllt",
+      emptyWikiHint:
         "Derzeit enthält das Wiki hauptsächlich rohe Quellimporte und Betriebsberichte. Dieser Tab wird nützlich, sobald Synthesen, Entitäten oder Konzepte geschrieben werden.",
       claims: "Aussagen",
       openQuestions: "Offene Fragen",
@@ -3943,7 +3955,7 @@ export const de: TranslationMap = {
       tidyingKnowledgeGraph: "der Wissensgraph wird aufgeräumt…",
       replayingConversations: "die heutigen Gespräche werden erneut durchlaufen…",
       weavingShortTerm: "Kurzfristiges wird ins Langfristige eingewebt…",
-      defragmentingMindPalace: "der Gedächtnispalast wird defragmentiert…",
+      defragmentingMemoryLane: "Erinnerungspfad wird defragmentiert…",
       filingLooseThoughts: "lose Gedanken werden abgelegt…",
       connectingDots: "entfernte Punkte werden verbunden…",
       compostingContext: "alte Kontextfenster werden kompostiert…",
@@ -5155,7 +5167,22 @@ export const de: TranslationMap = {
         manageSkills: "Skills verwalten",
         browseConnectors: "Konnektoren durchsuchen",
         addMcpServer: "MCP-Server hinzufügen…",
-        toolAccess: "Tool-Zugriff",
+        addMcpServerTitle: "MCP-Server hinzufügen",
+        addMcpServerDescription: "Konfiguriere den Server und wähle aus, wo er aktiviert ist.",
+        scopeLabel: "Verfügbarkeit",
+        scopeSession: "Diese Sitzung",
+        scopeEverywhere: "Überall",
+        scopeSessionHint:
+          "Der Server wird global deaktiviert gespeichert und nur für diese Sitzung aktiviert.",
+        scopeEverywhereHint: "Der Server wird gespeichert und für jede Sitzung aktiviert.",
+        toolAccess: {
+          label: "Tool-Zugriff",
+          loading: "Tools werden geladen…",
+          loadFailed: "Tools konnten nicht geladen werden.",
+          noTools: "Keine Tools für diesen Connector verfügbar.",
+          summary: "{enabled} von {total} Tools aktiviert",
+          summaryOne: "{enabled} von {total} Tool aktiviert",
+        },
         enabledCount: "{count} aktiv",
         loadingSkills: "Skills werden geladen…",
         skillsLoadFailed: "Skills konnten nicht geladen werden.",

@@ -2272,6 +2272,10 @@ export const fa: TranslationMap = {
     targetLabel: "URL یا فرمان",
     nameInvalid: "نام سرورها از حروف، اعداد، نقطه، خط تیره یا زیرخط استفاده می‌کند.",
     targetInvalid: "برای انتقال‌های HTTP یک URL یا برای stdio یک خط فرمان معتبر وارد کنید.",
+    sessionEnableFailed:
+      "سرور به‌صورت سراسری غیرفعال ذخیره شد، اما فعال‌کردن آن برای این نشست ناموفق بود: {error}",
+    sessionChanged: "نشست فعال پیش از فعال‌سازی تغییر کرد.",
+    sessionUnavailable: "نشست فعال در دسترس نیست؛ تازه‌سازی کنید و دوباره تلاش کنید.",
     nameTaken: "یک سرور MCP با نام «{name}» از قبل وجود دارد.",
     missing: "سرور MCP «{name}» در پیکربندی یافت نشد.",
     missingTransport: "انتقال موجود نیست",
@@ -2440,7 +2444,9 @@ export const fa: TranslationMap = {
       description:
         "دقیقاً یک افزونه حافظه صاحب جایگاه حافظه است. انتخاب یک موتور آن را فعال و بقیه را غیرفعال می‌کند.",
       rowTitle: "موتور حافظه",
+      openClawMemory: "OpenClaw Memory",
       off: "خاموش",
+      unavailable: "در دسترس نیست",
       autoHint:
         "هیچ موتوری در پیکربندی پین نشده است، بنابراین جایگاه به صاحب پیش‌فرض خود بازمی‌گردد.",
       explicitHint: "این موتور در پیکربندی تحت plugins.slots.memory پین شده است.",
@@ -2739,6 +2745,11 @@ export const fa: TranslationMap = {
       title: "جستجوی ابزار",
       description:
         "یک فهرست ابزار محدود را قابل مشاهده نگه دارید و بقیه را پشت جستجو به تعویق بیندازید، تا کاتالوگ‌های بزرگ MCP و افزونه دیگر پرامپت را شلوغ نکنند.",
+    },
+    loopDetection: {
+      title: "تشخیص حلقه ابزار",
+      description:
+        "محافظ‌های تاریخچه غلتان را فعال کنید تا هنگام توقف پیشرفت عامل، فراخوانی‌های تکراری ابزار هشدار داده یا مسدود شوند.",
     },
     localModelLean: {
       title: "ابزارهای سبک برای مدل‌های محلی",
@@ -3769,12 +3780,12 @@ export const fa: TranslationMap = {
       loadingPage: "در حال بارگذاری صفحه ویکی…",
       dreamsTab: "رؤیاها",
       insightsTab: "بینش‌های واردشده",
-      palaceTab: "کاخ حافظه",
+      wikiTab: "ویکی حافظه",
       dreamsExplainer:
         "این دفترچه خام رؤیاست که سیستم هنگام بازپخش و تثبیت حافظه می‌نویسد؛ از آن برای بررسی آنچه سیستم حافظه توجه می‌کند و جایی که هنوز پرنویز یا کم‌مایه به نظر می‌رسد استفاده کنید.",
       insightsExplainer:
         "این‌ها بینش‌های واردشده هستند که از تاریخچه خارجی خوشه‌بندی شده‌اند؛ از آن‌ها برای بازبینی آنچه واردات پیش از آنکه بخشی از آن به حافظه پایدار ارتقا یابد آشکار کرده استفاده کنید.",
-      palaceExplainer:
+      wikiExplainer:
         "این سطح ویکی حافظه گردآوری‌شده است که سیستم می‌تواند در آن جستجو و استدلال کند؛ از آن برای بررسی صفحات واقعی حافظه، ادعاها، پرسش‌های باز و تناقض‌ها به جای گفتگوهای خام واردشده استفاده کنید.",
       copyArchivePath: "کپی مسیر بایگانی",
       loadingInsights: "در حال بارگذاری بینش‌های واردشده…",
@@ -3790,9 +3801,9 @@ export const fa: TranslationMap = {
       riskReasons: "دلایل خطر:",
       labels: "برچسب‌ها:",
       openSourcePage: "باز کردن صفحهٔ منبع",
-      loadingPalace: "در حال بارگذاری کاخ حافظه…",
-      emptyPalace: "کاخ حافظه هنوز پر نشده است",
-      emptyPalaceHint:
+      loadingWiki: "در حال بارگذاری ویکی حافظه…",
+      emptyWiki: "ویکی حافظه هنوز پر نشده است",
+      emptyWikiHint:
         "در حال حاضر ویکی بیشتر شامل درون‌ریزی‌های خام منبع و گزارش‌های عملیاتی است. این برگه زمانی مفید می‌شود که ترکیب‌ها، موجودیت‌ها یا مفاهیم شروع به نوشته‌شدن کنند.",
       claims: "ادعاها",
       openQuestions: "پرسش‌های باز",
@@ -3868,7 +3879,7 @@ export const fa: TranslationMap = {
       tidyingKnowledgeGraph: "در حال مرتب‌سازی گراف دانش…",
       replayingConversations: "در حال بازپخش گفت‌وگوهای امروز…",
       weavingShortTerm: "در حال بافتن کوتاه‌مدت در بلندمدت…",
-      defragmentingMindPalace: "در حال یکپارچه‌سازی کاخ ذهن…",
+      defragmentingMemoryLane: "در حال یکپارچه‌سازی مسیر حافظه…",
       filingLooseThoughts: "در حال بایگانی افکار پراکنده…",
       connectingDots: "در حال وصل کردن نقاط دور…",
       compostingContext: "در حال تبدیل پنجره‌های زمینه قدیمی به کود…",
@@ -5064,7 +5075,21 @@ export const fa: TranslationMap = {
         manageSkills: "مدیریت Skills",
         browseConnectors: "مرور رابط‌ها",
         addMcpServer: "افزودن سرور MCP…",
-        toolAccess: "دسترسی ابزار",
+        addMcpServerTitle: "افزودن سرور MCP",
+        addMcpServerDescription: "سرور را پیکربندی کنید و محل فعال‌سازی آن را انتخاب کنید.",
+        scopeLabel: "در دسترس بودن",
+        scopeSession: "این نشست",
+        scopeEverywhere: "همه‌جا",
+        scopeSessionHint: "سرور به‌صورت سراسری غیرفعال ذخیره می‌شود و فقط برای این نشست فعال می‌شود.",
+        scopeEverywhereHint: "سرور برای هر نشست ذخیره و فعال می‌شود.",
+        toolAccess: {
+          label: "دسترسی ابزار",
+          loading: "در حال بارگذاری ابزارها…",
+          loadFailed: "بارگذاری ابزارها ممکن نشد.",
+          noTools: "ابزاری برای این رابط در دسترس نیست.",
+          summary: "{enabled} از {total} ابزار روشن",
+          summaryOne: "{enabled} از {total} ابزار روشن",
+        },
         enabledCount: "{count} فعال",
         loadingSkills: "در حال بارگذاری Skills…",
         skillsLoadFailed: "بارگذاری Skills ممکن نشد.",
