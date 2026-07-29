@@ -6,6 +6,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import { CURRENT_SESSION_VERSION, SessionManager } from "../agents/sessions/session-manager.js";
 import {
   loadExactSqliteSessionEntry,
   loadSqliteTranscriptEventsSync,
@@ -415,7 +416,7 @@ describe("runDoctorSessionSqlite", () => {
     }
   });
 
-  it("repairs legacy message and route shapes at the import boundary", async () => {
+  it("repairs legacy transcript and route shapes at the import boundary", async () => {
     const store = createLegacyStore({
       entryOverrides: {
         route: "stale-custom-slot",
@@ -450,7 +451,29 @@ describe("runDoctorSessionSqlite", () => {
     const message = events.find((event) => (event as { type?: string }).type === "message") as {
       message?: { content?: unknown };
     };
+    expect(events[0]).toMatchObject({
+      id: "session-1",
+      type: "session",
+      version: CURRENT_SESSION_VERSION,
+    });
+    expect(events[0]).not.toHaveProperty("sessionId");
     expect(message?.message?.content).toEqual([{ type: "text", text: "legacy string" }]);
+    const manager = SessionManager.open(
+      {
+        agentId: "main",
+        sessionId: "session-1",
+        sessionKey: "agent:main:main",
+        storePath: store.storePath,
+      },
+      store.tempDir,
+    );
+    expect(
+      manager.appendMessage({
+        content: "post-import message",
+        role: "user",
+        timestamp: Date.now(),
+      }),
+    ).toEqual(expect.any(String));
     closeOpenClawAgentDatabasesForTest();
     const sqlite = nodeSqlite.requireNodeSqlite();
     const migrated = new sqlite.DatabaseSync(
@@ -2024,7 +2047,12 @@ describe("runDoctorSessionSqlite", () => {
   );
 
   it("imports aliases that share one legacy transcript before archiving it", async () => {
-    const store = createLegacyStore();
+    const store = createLegacyStore({
+      transcriptLines: [
+        '{"type":"session","sessionId":"session-1"}',
+        '{"type":"message","message":{"role":"user","content":"shared legacy message"}}',
+      ],
+    });
     const legacyStore = JSON.parse(fs.readFileSync(store.storePath, "utf-8")) as Record<
       string,
       unknown

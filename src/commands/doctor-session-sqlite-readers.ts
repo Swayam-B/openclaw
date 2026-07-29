@@ -3,7 +3,12 @@ import fs from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { TextDecoder } from "node:util";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import { normalizeLoadedFileEntry, type FileEntry } from "../agents/sessions/session-manager.js";
+import {
+  migrateToCurrentVersion,
+  normalizeLoadedFileEntry,
+  partitionSessionFileEntries,
+} from "../agents/sessions/session-manager-codec.js";
+import type { FileEntry } from "../agents/sessions/session-manager-types.js";
 import type { TranscriptEvent } from "../config/sessions/session-accessor.js";
 import type { SqliteTranscriptStorageRow } from "../config/sessions/session-accessor.sqlite-read.js";
 import { resolveSqliteTargetFromSessionStorePath } from "../config/sessions/session-sqlite-target.js";
@@ -75,34 +80,64 @@ export function countTranscriptEventsForPath(
 
 export function createTranscriptEventReader(
   transcriptPath: string,
+  sessionId: string,
 ): (append: (event: TranscriptEvent) => void) => void {
   return (append) => {
-    for (const line of iterateJsonlLinesSync(transcriptPath)) {
-      const parsed = parseJsonlLine(line);
-      if (parsed) {
-        // Import is the migration boundary: repair legacy JSONL message shapes
-        // here because the SQLite runtime read path assumes canonical rows.
-        append(normalizeLoadedFileEntry(parsed as FileEntry) as TranscriptEvent);
-      }
+    for (const event of readTranscriptEventsForImport(transcriptPath, sessionId, false)) {
+      append(event as TranscriptEvent);
     }
   };
 }
 
 export function createTranscriptEventPrefixReader(
   transcriptPath: string,
+  sessionId: string,
 ): (append: (event: TranscriptEvent) => void) => void {
   return (append) => {
-    try {
-      for (const line of iterateJsonlLinesSync(transcriptPath)) {
-        const parsed = parseJsonlLine(line);
-        if (parsed) {
-          append(normalizeLoadedFileEntry(parsed as FileEntry) as TranscriptEvent);
-        }
-      }
-    } catch {
-      // The caller records the malformed transcript issue; keep the readable prefix.
+    for (const event of readTranscriptEventsForImport(transcriptPath, sessionId, true)) {
+      append(event as TranscriptEvent);
     }
   };
+}
+
+function readTranscriptEventsForImport(
+  transcriptPath: string,
+  sessionId: string,
+  allowMalformedPrefix: boolean,
+): FileEntry[] {
+  const events: FileEntry[] = [];
+  try {
+    for (const line of iterateJsonlLinesSync(transcriptPath)) {
+      const parsed = parseJsonlLine(line);
+      if (parsed) {
+        events.push(normalizeLoadedFileEntry(parsed as FileEntry));
+      }
+    }
+  } catch (error) {
+    if (!allowMalformedPrefix) {
+      throw error;
+    }
+    // The caller records the malformed transcript issue; keep the readable prefix.
+  }
+
+  const headerIndex = events.findIndex((event) => isRecord(event) && event.type === "session");
+  if (headerIndex >= 0) {
+    const legacyHeader = events[headerIndex] as unknown as Record<string, unknown>;
+    const canonicalHeader = { ...legacyHeader, id: sessionId, type: "session" };
+    delete canonicalHeader.sessionId;
+    events[headerIndex] = canonicalHeader as FileEntry;
+  }
+
+  // Import is the migration boundary. Migrate only recognized rows so opaque
+  // plugin events keep their original bytes and ordering.
+  const partitioned = partitionSessionFileEntries(events);
+  migrateToCurrentVersion(partitioned.fileEntries, partitioned.fileEntriesByOriginalIndex);
+  for (const [index, migratedEvent] of partitioned.fileEntriesByOriginalIndex.entries()) {
+    if (migratedEvent) {
+      events[index] = migratedEvent;
+    }
+  }
+  return events;
 }
 
 export function readSqliteEntryCount(target: SessionStoreTarget): number {
