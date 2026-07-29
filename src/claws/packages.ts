@@ -95,6 +95,7 @@ function packageFromAction(action: ClawAddPlanAction): PlannedClawPackage {
     version: details.version,
     integrity: details.integrity,
     ownerAction: details.ownerAction,
+    ...(details.extension ? { extension: details.extension } : {}),
     ...(details.installId ? { installId: details.installId } : {}),
     ...(details.riskWarning ? { riskWarning: details.riskWarning } : {}),
   };

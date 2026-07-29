@@ -5,16 +5,13 @@ import { transformConfigFileWithRetry } from "../config/config.js";
 import type { AgentConfig } from "../config/types.agents.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db.js";
+import { clawTargetPackages } from "./application-provenance.js";
 import {
   applyClawCronUpdate,
   ClawCronUpdateError,
   type ClawCronUpdateExecution,
 } from "./cron-update.js";
 import type { ClawCronGateway } from "./cron.js";
-import {
-  CLAW_EXTENSION_MUTATION_UNAVAILABLE_MESSAGE,
-  hasClawProfileExtensions,
-} from "./extension-mutation-guard.js";
 import { buildClawAddPlan, type ClawAddPlanContext } from "./lifecycle.js";
 import {
   applyClawMcpUpdate,
@@ -47,7 +44,6 @@ import {
   CLAW_SETUP_SCHEMA_VERSION,
   type ClawManifest,
   type ClawOpenClawProfile,
-  type ClawPackage,
   type ClawSourceIdentity,
 } from "./types.js";
 import { buildClawUpdatePlan, type ClawUpdateAction, type ClawUpdatePlan } from "./update-plan.js";
@@ -140,12 +136,6 @@ export async function applyClawUpdatePlan(
     throw new ClawUpdateMutationError(
       "update_blocked",
       "The Claw update plan contains blockers or manual actions.",
-    );
-  }
-  if (hasClawProfileExtensions(params.targetOpenClawProfile)) {
-    throw new ClawUpdateMutationError(
-      "extension_mutation_unavailable",
-      CLAW_EXTENSION_MUTATION_UNAVAILABLE_MESSAGE,
     );
   }
 
@@ -282,9 +272,7 @@ export async function applyClawUpdatePlan(
       "Claw personalization state changed after update planning; build a new dry-run plan.",
     );
   }
-  const targetPackages = new Map<string, ClawPackage>(
-    params.targetManifest.packages.map((pkg) => [`${pkg.kind}:${pkg.ref}`, pkg] as const),
-  );
+  const targetPackages = clawTargetPackages(params.targetManifest, params.targetOpenClawProfile);
   for (const action of fresh.actions.filter(
     (candidate) =>
       candidate.kind === "package" &&
@@ -304,6 +292,7 @@ export async function applyClawUpdatePlan(
           integrity: details?.integrity,
           installId: details?.installId,
           riskWarning: details?.riskWarning,
+          extension: details?.extension,
         })
     ) {
       throw new ClawUpdateMutationError(

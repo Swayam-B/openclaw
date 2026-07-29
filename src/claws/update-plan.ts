@@ -7,7 +7,15 @@ import {
   openExistingOpenClawStateDatabaseReadOnly,
   type OpenClawStateDatabaseOptions,
 } from "../state/openclaw-state-db.js";
-import { clawProfileExtensionPackages } from "./application-plan.js";
+import {
+  clawExtensionProvenanceChanged,
+  clawPackageActionsById,
+  clawPackageKey,
+  clawTargetPackages,
+  clawWorkspaceActionsById,
+  isApplicationUpdateBlocker,
+  recordingClawPackagePreflight,
+} from "./application-provenance.js";
 import { readClawStatus } from "./lifecycle-state.js";
 import { buildClawAddPlan } from "./lifecycle.js";
 import { digestClawMcpServer, readClawMcpServerRefsByName } from "./mcp.js";
@@ -19,7 +27,7 @@ import {
   type ClawDiagnostic,
   type ClawManifest,
   type ClawOpenClawProfile,
-  type ClawPackage,
+  type ClawPackagePreflight,
   type ClawPackagePreflightResult,
   type ClawSourceIdentity,
 } from "./types.js";
@@ -59,10 +67,7 @@ export async function buildClawUpdatePlan(params: {
   config: OpenClawConfig;
   sourceMcpServers: Record<string, Record<string, unknown>>;
   stateOptions?: OpenClawStateDatabaseOptions & { packageDeps?: PackageRemovalDeps };
-  packagePreflight?: (
-    pkg: ClawPackage,
-    workspaceDir: string,
-  ) => Promise<ClawPackagePreflightResult>;
+  packagePreflight?: ClawPackagePreflight;
   diagnostics?: ClawDiagnostic[];
   answers?: unknown;
 }): Promise<ClawUpdatePlan> {
@@ -119,6 +124,7 @@ export async function buildClawUpdatePlan(params: {
       ...readOnlyStateOptions,
       config: params.config,
       sourceMcpServers: params.sourceMcpServers,
+      ...(params.packagePreflight ? { packagePreflight: params.packagePreflight } : {}),
     });
     if (status.records.length === 0) {
       return makeEmptyClawUpdatePlan({
@@ -175,7 +181,6 @@ export async function buildClawUpdatePlan(params: {
       });
     }
 
-    const packageKey = (value: { kind: string; ref: string }) => `${value.kind}:${value.ref}`;
     const packagePreflights = new Map<string, ClawPackagePreflightResult>();
     const targetPlan = await buildClawAddPlan({
       manifest: params.targetManifest,
@@ -187,26 +192,14 @@ export async function buildClawUpdatePlan(params: {
         agentId,
         workspace: record.install.workspace,
         resumableWorkspace: record.install.workspace,
-        packagePreflight: async (pkg) => {
-          const result = params.packagePreflight
-            ? await params.packagePreflight(pkg, record.install.workspace)
-            : {
-                ok: false,
-                code: "package_install_unavailable",
-                message: "Package preflight is unavailable.",
-              };
-          packagePreflights.set(packageKey(pkg), result);
-          return result;
-        },
+        packagePreflight: recordingClawPackagePreflight(
+          params.packagePreflight,
+          record.install.workspace,
+          packagePreflights,
+        ),
       },
     });
-    const blockers = targetPlan.blockers.filter(
-      (entry) =>
-        entry.code !== "workspace_collision" &&
-        entry.code !== "agent_id_collision" &&
-        !entry.code.startsWith("setup_") &&
-        !entry.path.startsWith("$.packages"),
-    );
+    const blockers = targetPlan.blockers.filter(isApplicationUpdateBlocker);
     const actions: ClawUpdateAction[] = [];
     const capabilityChanges: ClawUpdateCapabilityChange[] = [];
 
@@ -245,14 +238,7 @@ export async function buildClawUpdatePlan(params: {
       desiredAgent: targetPlan.agent.config,
     });
 
-    const targetFiles = new Map(
-      targetPlan.actions
-        .filter(
-          (action) =>
-            action.kind === "workspaceFile" && action.sourceKind !== "personalizationSeed",
-        )
-        .map((action) => [action.id, action] as const),
-    );
+    const targetFiles = clawWorkspaceActionsById(targetPlan.actions);
     const currentFiles = new Map(record.workspaceFiles.map((file) => [file.path, file] as const));
     let workspace: Awaited<ReturnType<typeof fsSafeRoot>> | undefined;
     let workspaceState: "present" | "missing" | "unsafe" = "present";
@@ -309,7 +295,9 @@ export async function buildClawUpdatePlan(params: {
               ? "add"
               : currentFileRequiresManual
                 ? "manual"
-                : current.contentDigest === target.digest && current.state === "unchanged"
+                : current.contentDigest === target.digest &&
+                    current.role === target.details?.role &&
+                    current.state === "unchanged"
                   ? "unchanged"
                   : "change";
       actions.push({
@@ -330,8 +318,8 @@ export async function buildClawUpdatePlan(params: {
                   : action === "manual"
                     ? "Local workspace content changed or became unsafe and must be reconciled manually."
                     : action === "unchanged"
-                      ? "Managed workspace content already matches the target source."
-                      : "Target source changes or restores managed workspace content.",
+                      ? "Managed workspace content and resource role already match the target source."
+                      : "Target source or resource role changes, or managed content is restored.",
         ...(current ? { currentDigest: current.contentDigest } : {}),
         ...(current ? { currentPresent: current.state !== "missing" } : {}),
         desiredDigest: target.digest,
@@ -364,15 +352,19 @@ export async function buildClawUpdatePlan(params: {
     blockers.push(...setup.blockers);
 
     const allPackages = readClawPackageRefs(readOnlyStateOptions);
-    const currentPackages = new Map(record.packages.map((pkg) => [packageKey(pkg), pkg] as const));
-    const targetPackageList = [
-      ...params.targetManifest.packages,
-      ...clawProfileExtensionPackages(params.targetOpenClawProfile),
-    ];
-    const targetPackages = new Map(targetPackageList.map((pkg) => [packageKey(pkg), pkg] as const));
+    const currentPackages = new Map(
+      record.packages.map((pkg) => [clawPackageKey(pkg), pkg] as const),
+    );
+    const targetPackages = clawTargetPackages(params.targetManifest, params.targetOpenClawProfile);
+    const targetPackageActions = clawPackageActionsById(targetPlan.actions);
     for (const [key, target] of targetPackages) {
       const current = currentPackages.get(key);
       const preflight = packagePreflights.get(key);
+      const targetExtension = targetPackageActions.get(key)?.details?.extension;
+      const extensionChanged = clawExtensionProvenanceChanged(
+        current?.extension,
+        targetPackageActions.get(key),
+      );
       const requiresPackageMutation =
         !current ||
         (current.origin === "claw-introduced" &&
@@ -414,7 +406,7 @@ export async function buildClawUpdatePlan(params: {
             ? "add"
             : current.state === "missing"
               ? "change"
-              : current.version === target.version
+              : current.version === target.version && !extensionChanged
                 ? "unchanged"
                 : "change";
       actions.push({
@@ -435,14 +427,17 @@ export async function buildClawUpdatePlan(params: {
             : action === "add"
               ? "Target manifest adds a package reference."
               : action === "unchanged"
-                ? "Recorded package reference already matches the exact target version."
-                : "Target manifest changes the exact package version.",
+                ? "Recorded package reference already matches the exact target version and extension mapping."
+                : current?.version === target.version
+                  ? "Target profile changes extension provenance without reinstalling the package."
+                  : "Target manifest changes the exact package version.",
         ...(current ? { currentDigest: digestClawPackageRef(current) } : {}),
         desiredDigest: digest({
           package: target,
           integrity: preflight?.integrity,
           installId: preflight?.installId,
           riskWarning: preflight?.warning,
+          extension: targetExtension,
         }),
       });
       const capabilityChange = packageCapabilityChange({
@@ -459,12 +454,12 @@ export async function buildClawUpdatePlan(params: {
       }
       if (failedPackageMutationPreflight) {
         const packageIndex = params.targetManifest.packages.findIndex(
-          (pkg) => packageKey(pkg) === key,
+          (pkg) => clawPackageKey(pkg) === key,
         );
         const extensionIndex =
           params.targetOpenClawProfile?.schemaVersion === 2
             ? params.targetOpenClawProfile.extensions.findIndex(
-                (extension) => packageKey(extension) === key,
+                (extension) => clawPackageKey(extension) === key,
               )
             : -1;
         const path =

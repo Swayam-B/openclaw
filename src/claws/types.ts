@@ -197,7 +197,19 @@ export type ClawPackage = {
   version: string;
 };
 
-export type ResolvedClawPackage = ClawPackage & { integrity: string };
+export type ClawAppliedExtension = {
+  id: string;
+  format: ClawExtensionFormat;
+  detectedFormat: ClawExtensionFormat;
+  mapped: string[];
+  unavailable: string[];
+  adapterIdentity: string;
+};
+
+export type ResolvedClawPackage = ClawPackage & {
+  integrity: string;
+  extension?: ClawAppliedExtension;
+};
 
 export type ClawPackagePreflightResult = {
   ok: boolean;

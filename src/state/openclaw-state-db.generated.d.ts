@@ -307,6 +307,12 @@ export interface ClawMcpServerRefs {
 export interface ClawPackageRefs {
   agent_id: string;
   claw_name: string;
+  extension_adapter_identity: string | null;
+  extension_detected_format: string | null;
+  extension_format: string | null;
+  extension_id: string | null;
+  extension_mapped_json: string | null;
+  extension_unavailable_json: string | null;
   independent_owner: number;
   installed_at_ms: number;
   origin: string;
@@ -352,6 +358,7 @@ export interface ClawWorkspaceFiles {
   agent_id: string;
   content_digest: string;
   created_at_ms: number;
+  role: string | null;
   schema_version: string;
   source_path: string;
   status: string;

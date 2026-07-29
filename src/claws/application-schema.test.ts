@@ -222,7 +222,18 @@ describe("Claw application planning", () => {
       }),
     ]);
     expect(plan.actions).toContainEqual(
-      expect.objectContaining({ kind: "package", id: "extension:github", blocked: false }),
+      expect.objectContaining({
+        kind: "package",
+        id: "plugin:@acme/github",
+        blocked: false,
+        details: expect.objectContaining({
+          extension: expect.objectContaining({
+            id: "github",
+            detectedFormat: "claude",
+            mapped: ["commands", "skills"],
+          }),
+        }),
+      }),
     );
     expect(plan.actions).toContainEqual(
       expect.objectContaining({
@@ -263,5 +274,32 @@ describe("Claw application planning", () => {
     expect(plan.blockers).toContainEqual(
       expect.objectContaining({ code: "extension_format_mismatch" }),
     );
+  });
+
+  it("blocks successful extension preflight without complete adapter provenance", async () => {
+    const { source, workspace } = await createPlanSource();
+    const manifest = requireManifest({ schemaVersion: 2, agent: { id: "github-triage" } });
+    const plan = await buildClawAddPlan({
+      manifest,
+      openClawProfile: { schemaVersion: 2, agent: {}, extensions: [extension] },
+      source,
+      context: {
+        workspace,
+        packagePreflight: async () => ({
+          ok: true,
+          action: "install",
+          integrity: `sha256:${"b".repeat(64)}`,
+          installId: "github",
+          detectedFormat: "claude",
+          mapped: ["skills"],
+          unavailable: [],
+        }),
+      },
+    });
+
+    expect(plan.blockers).toContainEqual(
+      expect.objectContaining({ code: "extension_provenance_incomplete" }),
+    );
+    expect(plan.extensions[0]?.blocked).toBe(true);
   });
 });
