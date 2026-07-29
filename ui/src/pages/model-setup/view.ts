@@ -74,6 +74,7 @@ type ModelSetupViewProps = {
   manualApiKey: string;
   manualError: string | null;
   moreSignInOpen: boolean;
+  firstRun: boolean;
   iconUrls: Readonly<Record<string, string>>;
   onDetect: () => void;
   onVerify: () => void;
@@ -122,6 +123,7 @@ function failureLabel(status: string): string {
 function renderSuccess(
   activation: Extract<ModelSetupActivationState, { phase: "success" }>,
   onOpenChat: () => void,
+  firstRun: boolean,
 ) {
   return html`
     <div class="model-setup__success" role="status">
@@ -137,7 +139,7 @@ function renderSuccess(
         </div>
       </div>
       <button type="button" class="btn primary" @click=${onOpenChat}>
-        ${t("modelSetup.success.openChat")}
+        ${t(firstRun ? "modelSetup.success.continueSetup" : "modelSetup.success.openChat")}
       </button>
     </div>
   `;
@@ -523,7 +525,7 @@ function renderManual(props: ModelSetupViewProps, result: SystemAgentSetupDetect
 
 function renderReady(props: ModelSetupViewProps, result: SystemAgentSetupDetectResult) {
   if (props.activation.phase === "success") {
-    return renderSuccess(props.activation, props.onOpenChat);
+    return renderSuccess(props.activation, props.onOpenChat, props.firstRun);
   }
   const current = result.configuredModel
     ? renderCurrentConnection(props, result.configuredModel)
