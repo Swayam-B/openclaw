@@ -514,7 +514,7 @@ export const cronHandlers: GatewayRequestHandlers = {
       respond(
         false,
         undefined,
-        errorShape(ErrorCodes.INVALID_REQUEST, `cron job not found: ${jobId}`),
+        errorShape(ErrorCodes.INVALID_REQUEST, `automation not found: ${jobId}`),
       );
       return;
     }

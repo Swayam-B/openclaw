@@ -83,7 +83,7 @@ describe("disableCronJobsBoundToSession", () => {
     return vi.fn(async (id: string, _patch: unknown, precondition: Precondition) => {
       const current = currentJobs().find((candidate) => candidate.id === id);
       if (!current) {
-        throw new Error(`cron job not found: ${id}`);
+        throw new Error(`automation not found: ${id}`);
       }
       await precondition(current, 0);
       return current;

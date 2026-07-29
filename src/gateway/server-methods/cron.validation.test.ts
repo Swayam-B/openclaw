@@ -127,7 +127,7 @@ function createCronContext(currentJobs?: CronJob | CronJob[]) {
         ) => {
           const job = jobs.find((candidate) => candidate.id === id);
           if (!job) {
-            throw new Error(`unknown cron job id: ${id}`);
+            throw new Error(`unknown automation id: ${id}`);
           }
           await precondition(job, Date.now());
           return await update(id, patch);
@@ -628,7 +628,7 @@ describe("cron method validation", () => {
 
     expectResponseError(respond, {
       code: "INVALID_REQUEST",
-      messageIncludes: "cron job not found: cron-42",
+      messageIncludes: "automation not found: cron-42",
     });
   });
 
@@ -645,7 +645,7 @@ describe("cron method validation", () => {
 
     expectResponseError(respond, {
       code: "INVALID_REQUEST",
-      messageIncludes: "cron job not found: cron-42",
+      messageIncludes: "automation not found: cron-42",
     });
   });
 
@@ -666,7 +666,7 @@ describe("cron method validation", () => {
 
     expectResponseError(respond, {
       code: "INVALID_REQUEST",
-      messageIncludes: "cron job not found: cron-42",
+      messageIncludes: "automation not found: cron-42",
     });
     expect(JSON.stringify(respond.mock.calls)).not.toContain("fixture-marker");
   });
@@ -684,7 +684,7 @@ describe("cron method validation", () => {
 
     expectResponseError(respond, {
       code: "INVALID_REQUEST",
-      messageIncludes: "cron job not found: cron-42",
+      messageIncludes: "automation not found: cron-42",
     });
     expect(JSON.stringify(respond.mock.calls)).not.toContain("deploy");
   });
@@ -694,7 +694,7 @@ describe("cron method validation", () => {
 
     expectResponseError(respond, {
       code: "INVALID_REQUEST",
-      messageIncludes: "cron job not found: missing",
+      messageIncludes: "automation not found: missing",
     });
   });
 
@@ -1375,7 +1375,7 @@ describe("cron method validation", () => {
     );
     expectResponseError(siblingGet.respond, {
       code: "INVALID_REQUEST",
-      messageIncludes: `cron job not found: ${siblingJob.id}`,
+      messageIncludes: `automation not found: ${siblingJob.id}`,
     });
 
     const expiredRunClient = callerClient(
@@ -1392,7 +1392,7 @@ describe("cron method validation", () => {
     );
     expectResponseError(expiredGet.respond, {
       code: "INVALID_REQUEST",
-      messageIncludes: `cron job not found: ${accountJob.id}`,
+      messageIncludes: `automation not found: ${accountJob.id}`,
     });
 
     const runs = await invokeCron(
@@ -3182,7 +3182,7 @@ describe("cron method validation", () => {
 
   it("returns INVALID_REQUEST when cron.run cannot find the job", async () => {
     const context = createCronContext();
-    context.cron.enqueueRun.mockRejectedValueOnce(new Error("unknown cron job id: missing"));
+    context.cron.enqueueRun.mockRejectedValueOnce(new Error("unknown automation id: missing"));
     const { respond } = await invokeCron("cron.run", { id: "missing" }, { context });
 
     expect(context.cron.enqueueRun).not.toHaveBeenCalled();

@@ -224,7 +224,7 @@ export function registerCronAddCommand(cron: Command) {
               const toolsAllow = parseCronToolsAllow(opts.tools);
               if (optionMessage && positionalMessage && optionMessage !== positionalMessage) {
                 throw new Error(
-                  "Pass the cron job message either positionally or with --message, not both.",
+                  "Pass the automation message either positionally or with --message, not both.",
                 );
               }
               const message = optionMessage ?? positionalMessage ?? "";
@@ -435,7 +435,7 @@ export function registerCronAddCommand(cron: Command) {
             const positionalName = hasScheduleFlag ? normalizeOptionalString(nameArg) : undefined;
             if (optionName && positionalName && optionName !== positionalName) {
               throw new Error(
-                "Pass the cron job name either positionally or with --name, not both.",
+                "Pass the automation name either positionally or with --name, not both.",
               );
             }
             const name = optionName ?? positionalName ?? "";

@@ -921,7 +921,7 @@ test("archiving a session disables cron jobs bound to it", async () => {
     async (id: string, _patch: unknown, precondition: (job: CronJob, nowMs: number) => void) => {
       const current = jobs.find((candidate) => candidate.id === id);
       if (!current) {
-        throw new Error(`cron job not found: ${id}`);
+        throw new Error(`automation not found: ${id}`);
       }
       precondition(current, Date.now());
       return current;

@@ -623,7 +623,7 @@ describe("gateway server cron", () => {
       const missingGetRes = await directCronReq(cronState, "cron.get", { id: "missing-job-id" });
       expect(missingGetRes.ok).toBe(false);
       expect(missingGetRes.error?.code).toBe("INVALID_REQUEST");
-      expect(missingGetRes.error?.message).toContain("cron job not found: missing-job-id");
+      expect(missingGetRes.error?.message).toContain("automation not found: missing-job-id");
     } finally {
       await cleanupCronTestRun({
         cronState,

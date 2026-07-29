@@ -184,7 +184,7 @@ export function registerCronSimpleCommands(cron: Command) {
             includeDeliveryPreview: !opts.json,
           });
           if (!job) {
-            throw new Error(`cron job not found: ${String(id)}`);
+            throw new Error(`automation not found: ${String(id)}`);
           }
           if (opts.json) {
             printCronJson(enrichCronJsonWithStatus(job));
