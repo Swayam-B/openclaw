@@ -5492,7 +5492,8 @@ describe("qa mock openai server", () => {
     if (typeof toolUse.id !== "string" || !toolUse.id) {
       throw new Error("expected Anthropic image plan tool_use id");
     }
-    const toolUseId = toolUse.id;
+    const toolUseId = normalizeMockOwnershipCallId(toolUse.id, "anthropic");
+    const replayedToolUse = { ...toolUse, id: toolUseId };
 
     const completionCarrier = [
       "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>",
@@ -5513,7 +5514,7 @@ describe("qa mock openai server", () => {
       tools,
       messages: [
         { role: "user", content: [{ type: "text", text: prompt }] },
-        { role: "assistant", content: [toolUse] },
+        { role: "assistant", content: [replayedToolUse] },
         {
           role: "user",
           content: [

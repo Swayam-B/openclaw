@@ -15,6 +15,8 @@ import {
   QA_TOOL_SEARCH_FAILURE_PROMPT_RE,
   type MockScenarioState,
   buildMockScenarioStateCallKey,
+  normalizeMockOwnershipCallId,
+  resolveProviderVariant,
   resolveMockScenarioStateNamespace,
 } from "./mock-openai-contracts.js";
 import {
@@ -118,9 +120,13 @@ export function buildAssistantText(
       : "";
   const completedImageEvent = extractCompletedImageGenerationEvent(input);
   const completionCallId = extractToolOutputCallId(input);
+  const ownedCompletionCallId = normalizeMockOwnershipCallId(
+    completionCallId,
+    resolveProviderVariant(typeof body.model === "string" ? body.model : undefined),
+  );
   const scenarioNamespace = resolveMockScenarioStateNamespace(body);
-  const completionCallKey = completionCallId
-    ? buildMockScenarioStateCallKey(scenarioNamespace, completionCallId)
+  const completionCallKey = ownedCompletionCallId
+    ? buildMockScenarioStateCallKey(scenarioNamespace, ownedCompletionCallId)
     : "";
   let pendingImageCallKey: string | undefined;
   if (completionCallKey) {

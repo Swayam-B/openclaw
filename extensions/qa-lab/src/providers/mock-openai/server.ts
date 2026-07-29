@@ -1238,8 +1238,9 @@ async function buildResponsesPayload(
         });
     const callId = extractPlannedToolCallId(events);
     if (callId) {
+      const ownedCallId = normalizeMockOwnershipCallId(callId, providerVariant);
       scenarioState.pendingImageGenerationCalls.set(
-        buildMockScenarioStateCallKey(scenarioStateNamespace, callId),
+        buildMockScenarioStateCallKey(scenarioStateNamespace, ownedCallId),
         { namespace: scenarioStateNamespace, prompt: imageArgs.prompt },
       );
     }
