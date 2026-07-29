@@ -6,7 +6,7 @@ import type {
 
 /** Compat code marking install records that need config-path activation metadata. */
 export const CONFIG_PATH_ACTIVATION_COMPAT_CODE = "activation-config-path-hint";
-export const CAPABILITY_ACTIVATION_COMPAT_CODE = "activation-capability-hint";
+const CAPABILITY_ACTIVATION_COMPAT_CODE = "activation-capability-hint";
 
 function recordUsesConfigPathActivation(plugin: InstalledPluginIndexRecord): boolean {
   return plugin.compat.includes(CONFIG_PATH_ACTIVATION_COMPAT_CODE);
