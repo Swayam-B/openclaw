@@ -2,11 +2,16 @@
  * Codex CLI and app-server bundle MCP projection helpers.
  */
 import { normalizeConfiguredMcpServers } from "../../config/mcp-config-normalize.js";
+import type { SessionToolOverrides } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { BundleMcpConfig, BundleMcpServerConfig } from "../../plugins/bundle-mcp.js";
 import { isValidAgentId, normalizeAgentId } from "../../routing/session-key.js";
 import { isRecord } from "../bundle-mcp-adapter.js";
-import { buildCodexMcpServersConfig, normalizeCodexMcpServerConfig } from "../codex-mcp-config.js";
+import {
+  applyCodexSessionMcpToolDenials,
+  buildCodexMcpServersConfig,
+  normalizeCodexMcpServerConfig,
+} from "../codex-mcp-config.js";
 import { requiresMcpBearerProjection, resolveMcpBearerBundleConfig } from "../mcp-auth-profile.js";
 import { partitionMcpServersByConnectionScope } from "../mcp-connection-resolver.js";
 import { serializeTomlInlineValue } from "./toml-inline.js";
@@ -30,6 +35,7 @@ type CodexUserMcpServersProjectionOptions = {
   agentDir?: string;
   allowLiteralOAuthProjection?: boolean;
   onServerUnavailable?: (serverName: string, error: unknown) => void;
+  toolOverrides?: Pick<SessionToolOverrides, "mcpServers" | "mcpToolsDeny">;
 };
 
 function normalizeAgentIds(value: unknown): string[] {
@@ -60,6 +66,14 @@ function isCodexMcpServerAllowedForAgent(
     return false;
   }
   return agentIds.includes(normalizeAgentId(options.agentId));
+}
+
+function readSessionMcpServerOverride(
+  options: CodexUserMcpServersProjectionOptions | undefined,
+  name: string,
+): boolean | undefined {
+  const overrides = options?.toolOverrides?.mcpServers;
+  return overrides && Object.hasOwn(overrides, name) ? overrides[name] : undefined;
 }
 
 /** Returns Codex CLI args with TOML MCP server overrides injected. */
@@ -96,13 +110,17 @@ export function buildCodexUserMcpServersThreadConfigPatch(
   }
   const mcp_servers: CodexThreadConfigObject = {};
   for (const [name, server] of entries) {
-    if (server.enabled === false) {
+    const serverOverride = readSessionMcpServerOverride(options, name);
+    if (serverOverride === false || (serverOverride !== true && server.enabled === false)) {
       continue;
     }
     if (!isCodexMcpServerAllowedForAgent(server as BundleMcpServerConfig, options)) {
       continue;
     }
-    mcp_servers[name] = normalizeCodexMcpServerConfig(name, server) as CodexThreadConfigObject;
+    mcp_servers[name] = normalizeCodexMcpServerConfig(
+      name,
+      applyCodexSessionMcpToolDenials(name, server, options?.toolOverrides),
+    ) as CodexThreadConfigObject;
   }
   if (Object.keys(mcp_servers).length === 0) {
     return undefined;
@@ -123,11 +141,14 @@ export async function buildCodexUserMcpServersThreadConfigPatchForRuntime(
     return undefined;
   }
   let allowedServers = Object.fromEntries(
-    entries.filter(
-      ([, server]) =>
-        server.enabled !== false &&
-        isCodexMcpServerAllowedForAgent(server as BundleMcpServerConfig, options),
-    ),
+    entries.filter(([name, server]) => {
+      const serverOverride = readSessionMcpServerOverride(options, name);
+      return (
+        serverOverride !== false &&
+        (serverOverride === true || server.enabled !== false) &&
+        isCodexMcpServerAllowedForAgent(server as BundleMcpServerConfig, options)
+      );
+    }),
   ) as BundleMcpConfig["mcpServers"];
   if (Object.keys(allowedServers).length === 0) {
     return undefined;
@@ -161,7 +182,10 @@ export async function buildCodexUserMcpServersThreadConfigPatchForRuntime(
   });
   const mcp_servers: CodexThreadConfigObject = {};
   for (const [name, server] of Object.entries(resolvedConfig.config.mcpServers)) {
-    mcp_servers[name] = normalizeCodexMcpServerConfig(name, server) as CodexThreadConfigObject;
+    mcp_servers[name] = normalizeCodexMcpServerConfig(
+      name,
+      applyCodexSessionMcpToolDenials(name, server, options?.toolOverrides),
+    ) as CodexThreadConfigObject;
   }
   return Object.keys(mcp_servers).length === 0 ? undefined : { mcp_servers };
 }

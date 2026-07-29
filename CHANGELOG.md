@@ -54,6 +54,7 @@ Docs: https://docs.openclaw.ai
 ### Fixes
 
 - **Gateway reconnect event ordering:** reset the shared TypeScript client's outer event-sequence baseline for each replacement WebSocket, preventing gap recovery from comparing unrelated connection generations across Control UI, TUI, SDK, and browser extension clients. Thanks @shakkernerd.
+- **Codex native MCP tool access:** surface thread-owned MCP catalogs in the composer Tool access view and enforce per-session server/tool denials in Codex app-server thread config.
 - **Skill Workshop offline apply:** preserve configless local proposal apply after upgrades under exclusive Gateway startup ownership, while keeping running Gateway snapshot invalidation fail-closed when CLI credentials are unavailable.
 - **macOS and Control UI keyboard navigation:** let Tab traverse links and controls inside embedded Dashboard, browser, and Canvas web views, and keep shortcuts working on non-Latin keyboard layouts without firing during IME composition.
 - **Control UI session diffs:** hide unchanged checkout modifications and untracked files that already existed when a thread started, so the diff panel attributes only files touched by that session. Fixes #115628.
