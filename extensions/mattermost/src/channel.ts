@@ -128,11 +128,19 @@ function hasMattermostPresentationNavigation(presentation: MessagePresentation):
   );
 }
 
+function readMattermostPayloadData(payload: {
+  channelData?: Record<string, unknown>;
+}): Record<string, unknown> | undefined {
+  const data = payload.channelData?.mattermost;
+  return data && typeof data === "object" && !Array.isArray(data)
+    ? (data as Record<string, unknown>)
+    : undefined;
+}
+
 function readMattermostPresentationButtons(payload: {
   channelData?: Record<string, unknown>;
 }): Array<unknown> | undefined {
-  const buttons = (payload.channelData?.mattermost as { presentationButtons?: unknown } | undefined)
-    ?.presentationButtons;
+  const buttons = readMattermostPayloadData(payload)?.presentationButtons;
   return Array.isArray(buttons) ? buttons : undefined;
 }
 
@@ -381,6 +389,30 @@ const mattermostMessageActions: ChannelMessageActionAdapter = {
   describeMessageTool: describeMattermostMessageTool,
   extractToolSend: ({ args }) => extractMattermostToolSend(args),
   extractToolSendResult: ({ result, send }) => extractMattermostToolSendResult(result, send),
+  prepareSendPayload: ({ ctx, payload }) => {
+    if (ctx.action !== "send") {
+      return null;
+    }
+    const mediaUrl = resolveMattermostSendAttachmentMedia(ctx.params);
+    const attachmentText =
+      typeof ctx.params.attachmentText === "string" ? ctx.params.attachmentText : undefined;
+    const existingMattermostData = readMattermostPayloadData(payload);
+    return {
+      ...payload,
+      ...(mediaUrl ? { mediaUrl, mediaUrls: [mediaUrl] } : {}),
+      ...(attachmentText !== undefined
+        ? {
+            channelData: {
+              ...payload.channelData,
+              mattermost: {
+                ...existingMattermostData,
+                attachmentText,
+              },
+            },
+          }
+        : {}),
+    };
+  },
   supportsAction: ({ action }) => {
     return action === "send" || action === "react" || action === "read";
   },
@@ -550,17 +582,7 @@ const mattermostMessageActions: ChannelMessageActionAdapter = {
       normalizeOptionalString(params.replyTo);
     const resolvedAccountId = accountId || undefined;
 
-    const attachmentMedia = collectMattermostAttachmentMedia(params);
-    if (attachmentMedia.hasUnsupportedAttachmentPayload) {
-      throw new Error(
-        "Mattermost send attachments require media, mediaUrl, path, filePath, fileUrl, mediaUrls, or attachments[] with one of those fields; buffer/base64 payloads are not supported.",
-      );
-    }
-    if (attachmentMedia.mediaUrls.length > 1) {
-      throw new Error(
-        "Mattermost send supports one attachment per message; split multiple mediaUrls or attachments[] entries into separate sends.",
-      );
-    }
+    const mediaUrl = resolveMattermostSendAttachmentMedia(params);
     const buttons = presentation ? buildMattermostPresentationButtons(presentation) : [];
 
     const result = await (
@@ -571,13 +593,11 @@ const mattermostMessageActions: ChannelMessageActionAdapter = {
       replyToId,
       buttons: buttons.length > 0 ? buttons : undefined,
       attachmentText: typeof params.attachmentText === "string" ? params.attachmentText : undefined,
-      mediaUrl: attachmentMedia.mediaUrls[0],
+      mediaUrl,
       mediaLocalRoots: mediaLocalRoots ?? mediaAccess?.localRoots,
       mediaReadFile: mediaReadFile ?? mediaAccess?.readFile,
       ...(mediaAccess?.workspaceDir ? { workspaceDir: mediaAccess.workspaceDir } : {}),
-      requireMediaUpload: requiresMattermostMediaUpload(attachmentMedia.mediaUrls[0])
-        ? true
-        : undefined,
+      requireMediaUpload: requiresMattermostMediaUpload(mediaUrl) ? true : undefined,
     });
 
     return {
@@ -725,6 +745,21 @@ function collectMattermostAttachmentMedia(params: Record<string, unknown>): {
   };
 }
 
+function resolveMattermostSendAttachmentMedia(params: Record<string, unknown>): string | undefined {
+  const attachmentMedia = collectMattermostAttachmentMedia(params);
+  if (attachmentMedia.hasUnsupportedAttachmentPayload) {
+    throw new Error(
+      "Mattermost send attachments require media, mediaUrl, path, filePath, fileUrl, mediaUrls, or attachments[] with one of those fields; buffer/base64 payloads are not supported.",
+    );
+  }
+  if (attachmentMedia.mediaUrls.length > 1) {
+    throw new Error(
+      "Mattermost send supports one attachment per message; split multiple mediaUrls or attachments[] entries into separate sends.",
+    );
+  }
+  return attachmentMedia.mediaUrls[0];
+}
+
 const mattermostOutbound: ChannelOutboundAdapter = {
   deliveryMode: "direct",
   chunker: chunkTextForOutbound,
@@ -769,7 +804,9 @@ const mattermostOutbound: ChannelOutboundAdapter = {
   },
   sendPayload: async (ctx) => {
     const buttons = readMattermostPresentationButtons(ctx.payload);
-    if (buttons?.length) {
+    const rawAttachmentText = readMattermostPayloadData(ctx.payload)?.attachmentText;
+    const attachmentText = typeof rawAttachmentText === "string" ? rawAttachmentText : undefined;
+    if (buttons?.length || attachmentText !== undefined) {
       const mediaUrl = resolvePayloadMediaUrls({
         ...ctx.payload,
         mediaUrl: ctx.payload.mediaUrl ?? ctx.mediaUrl,
@@ -787,7 +824,8 @@ const mattermostOutbound: ChannelOutboundAdapter = {
         ...(ctx.mediaAccess?.workspaceDir ? { workspaceDir: ctx.mediaAccess.workspaceDir } : {}),
         requireMediaUpload: requiresMattermostMediaUpload(mediaUrl) ? true : undefined,
         replyToId: ctx.replyToId ?? (ctx.threadId != null ? String(ctx.threadId) : undefined),
-        buttons,
+        buttons: buttons?.length ? buttons : undefined,
+        attachmentText,
       });
       return attachChannelToResult("mattermost", result);
     }
