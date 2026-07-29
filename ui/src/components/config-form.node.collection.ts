@@ -3,6 +3,12 @@ import { html, nothing, type TemplateResult } from "lit";
 import { icons } from "../components/icons.ts";
 import { t } from "../i18n/index.ts";
 import {
+  ConfigFormCollectionDraft,
+  type ConfigFormCollectionDraftCommit,
+  type ConfigFormCollectionDraftProps,
+} from "./config-form-collection-draft.ts";
+import { defaultValue, NO_SAFE_DEFAULT } from "./config-form.constraints.ts";
+import {
   getSensitiveRenderState,
   isAnySchema,
   jsonValue,
@@ -18,13 +24,22 @@ import {
   matchesNodeSelf,
   resolveConfigFieldMeta as resolveFieldMeta,
 } from "./config-form.search.ts";
-import { defaultValue, hintForPath } from "./config-form.shared.ts";
+import { configFieldId, hintForPath } from "./config-form.shared.ts";
 import { renderSettingsEmpty } from "./settings-ui.ts";
+
+function openCollectionDraft(event: Event, draftId: string): void {
+  const block = (event.currentTarget as HTMLElement).closest(".cfg-block");
+  const draft = Array.from(block?.children ?? []).find((child) => child.id === draftId);
+  if (draft instanceof ConfigFormCollectionDraft) {
+    draft.openDraft();
+  }
+}
 
 export function renderJsonTextarea(params: ConfigNodeRenderParams): TemplateResult {
   const { schema, value, path, hints, disabled, onPatch } = params;
   const showLabel = params.showLabel ?? true;
   const { label, help, tags } = resolveFieldMeta(path, schema, hints);
+  const helpId = showLabel && help ? configFieldId(path, "description") : undefined;
   const fallback = jsonValue(value);
   const sensitiveState = getSensitiveRenderState({
     path,
@@ -37,11 +52,15 @@ export function renderJsonTextarea(params: ConfigNodeRenderParams): TemplateResu
   return renderFieldRow({
     label,
     help,
+    helpId,
     tags,
     showLabel,
     stacked: true,
     control: renderJsonTextareaControl({
       path,
+      ariaLabel: String(label),
+      descriptionId: helpId,
+      sourceValue: params.sourceIdentity ?? value,
       fallback,
       rows: 3,
       sensitiveState,
@@ -110,6 +129,8 @@ export function renderObject(
         rawAvailable,
         unsupported,
         disabled,
+        isRequired: schema.required?.includes(propertyKey) ?? false,
+        controlIdentity: objectValue,
         searchCriteria: childSearchCriteria,
         revealSensitive,
         isSensitivePathRevealed,
@@ -195,6 +216,17 @@ export function renderArray(
     : Array.isArray(schema.default)
       ? schema.default
       : [];
+  const itemDefault = defaultValue(itemsSchema);
+  const belowMaxItems =
+    schema.maxItems === undefined || arrayValue.length < Math.max(0, schema.maxItems);
+  const draftId = configFieldId(path, "array-draft");
+  const draftProps: ConfigFormCollectionDraftProps = {
+    schema: itemsSchema,
+    label: String(label),
+    disabled: disabled || !belowMaxItems,
+    identity: draftId,
+    sourceIdentity: arrayValue,
+  };
 
   return html`
     <div class="cfg-block cfg-array">
@@ -213,13 +245,38 @@ export function renderArray(
           <button
             type="button"
             class="btn btn--sm"
-            ?disabled=${disabled}
-            @click=${() => onPatch(path, [...arrayValue, defaultValue(itemsSchema)])}
+            aria-controls=${itemDefault === NO_SAFE_DEFAULT ? draftId : nothing}
+            ?disabled=${disabled || !belowMaxItems}
+            @click=${(event: Event) => {
+              if (itemDefault === NO_SAFE_DEFAULT) {
+                openCollectionDraft(event, draftId);
+              } else {
+                onPatch(path, [...arrayValue, itemDefault]);
+              }
+            }}
           >
             ${t("configForm.add")}
           </button>
         </div>
       </div>
+      ${itemDefault === NO_SAFE_DEFAULT
+        ? html`
+            <openclaw-config-form-collection-draft
+              id=${draftId}
+              .props=${draftProps}
+              @config-collection-draft-commit=${(
+                event: CustomEvent<ConfigFormCollectionDraftCommit>,
+              ) => {
+                if (
+                  schema.maxItems === undefined ||
+                  arrayValue.length < Math.max(0, schema.maxItems)
+                ) {
+                  onPatch(path, [...arrayValue, event.detail.value]);
+                }
+              }}
+            ></openclaw-config-form-collection-draft>
+          `
+        : nothing}
       ${arrayValue.length === 0
         ? renderSettingsEmpty(t("configForm.noItems"))
         : html`
@@ -257,6 +314,9 @@ export function renderArray(
                     rawAvailable,
                     unsupported,
                     disabled,
+                    isRequired: true,
+                    sourceIdentity: item,
+                    controlIdentity: arrayValue,
                     searchCriteria: childSearchCriteria,
                     showLabel: false,
                     revealSensitive,
@@ -295,6 +355,16 @@ function renderMapField(
     onToggleSensitivePath,
   } = params;
   const anySchema = isAnySchema(schema);
+  const entryDefault = anySchema ? {} : defaultValue(schema);
+  const draftId = configFieldId(path, "map-draft");
+  const draftProps: ConfigFormCollectionDraftProps = {
+    schema,
+    label: t("configForm.customEntries"),
+    disabled,
+    identity: draftId,
+    sourceIdentity: value,
+    existingKeys: [...new Set([...Object.keys(value), ...reservedKeys])],
+  };
   const entries = Object.entries(value ?? {}).filter(([key]) => !reservedKeys.has(key));
   const visibleEntries =
     searchCriteria && hasSearchCriteria(searchCriteria)
@@ -319,8 +389,13 @@ function renderMapField(
           <button
             type="button"
             class="btn btn--sm"
+            aria-controls=${entryDefault === NO_SAFE_DEFAULT ? draftId : nothing}
             ?disabled=${disabled}
-            @click=${() => {
+            @click=${(event: Event) => {
+              if (entryDefault === NO_SAFE_DEFAULT) {
+                openCollectionDraft(event, draftId);
+                return;
+              }
               const nextValue = { ...value };
               let index = 1;
               let key = `custom-${index}`;
@@ -328,7 +403,7 @@ function renderMapField(
                 index += 1;
                 key = `custom-${index}`;
               }
-              nextValue[key] = anySchema ? {} : defaultValue(schema);
+              nextValue[key] = entryDefault;
               onPatch(path, nextValue);
             }}
           >
@@ -337,6 +412,22 @@ function renderMapField(
         </div>
       </div>
 
+      ${entryDefault === NO_SAFE_DEFAULT
+        ? html`
+            <openclaw-config-form-collection-draft
+              id=${draftId}
+              .props=${draftProps}
+              @config-collection-draft-commit=${(
+                event: CustomEvent<ConfigFormCollectionDraftCommit>,
+              ) => {
+                const key = event.detail.key;
+                if (key && !Object.hasOwn(value, key) && !reservedKeys.has(key)) {
+                  onPatch(path, { ...value, [key]: event.detail.value });
+                }
+              }}
+            ></openclaw-config-form-collection-draft>
+          `
+        : nothing}
       ${visibleEntries.length === 0
         ? renderSettingsEmpty(t("configForm.noCustomEntries"))
         : html`
@@ -358,16 +449,19 @@ function renderMapField(
                         type="text"
                         class="settings-input"
                         placeholder=${t("configForm.key")}
-                        aria-label=${t("configForm.key")}
+                        aria-label=${`${t("configForm.key")}: ${key}`}
                         .value=${key}
                         ?disabled=${disabled}
                         @change=${(event: Event) => {
-                          const nextKey = (event.target as HTMLInputElement).value.trim();
+                          const target = event.target as HTMLInputElement;
+                          const nextKey = target.value.trim();
                           if (!nextKey || nextKey === key) {
+                            target.value = key;
                             return;
                           }
                           const nextValue = { ...value };
                           if (nextKey in nextValue) {
+                            target.value = key;
                             return;
                           }
                           nextValue[nextKey] = nextValue[key];
@@ -403,6 +497,8 @@ function renderMapField(
                         stacked: true,
                         control: renderJsonTextareaControl({
                           path: valuePath,
+                          ariaLabel: `${key}: ${t("configForm.jsonValue")}`,
+                          sourceValue: entryValue,
                           fallback,
                           rows: 2,
                           sensitiveState,
@@ -419,6 +515,9 @@ function renderMapField(
                         rawAvailable,
                         unsupported,
                         disabled,
+                        isRequired: true,
+                        sourceIdentity: entryValue,
+                        controlIdentity: value,
                         searchCriteria,
                         showLabel: false,
                         revealSensitive,
