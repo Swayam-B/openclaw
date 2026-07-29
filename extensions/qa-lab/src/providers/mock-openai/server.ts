@@ -1247,13 +1247,14 @@ async function buildResponsesPayload(
   const requestFanoutNamespace = resolveSubagentFanoutPhaseNamespace(allInputText);
   const fanoutResultCallId =
     findSuccessfulSessionsSpawnToolResultCallId(input, "qa-fanout-beta") ?? "";
-  const successfulBetaSpawn = Boolean(fanoutResultCallId);
-  const fanoutNamespace =
-    scenarioState.subagentFanoutNamespaceByCallId.get(
-      buildMockScenarioStateCallKey(requestFanoutNamespace, fanoutResultCallId),
-    ) ?? requestFanoutNamespace;
+  const registeredFanoutNamespace = fanoutResultCallId
+    ? scenarioState.subagentFanoutNamespaceByCallId.get(
+        buildMockScenarioStateCallKey(requestFanoutNamespace, fanoutResultCallId),
+      )
+    : undefined;
+  const successfulBetaSpawn = registeredFanoutNamespace === requestFanoutNamespace;
   const consumedFanoutResultKey = buildMockScenarioStateCallKey(
-    fanoutNamespace,
+    requestFanoutNamespace,
     fanoutResultCallId,
   );
   if (
@@ -1261,7 +1262,7 @@ async function buildResponsesPayload(
     !scenarioState.consumedSubagentFanoutResultCallIds.has(consumedFanoutResultKey)
   ) {
     scenarioState.consumedSubagentFanoutResultCallIds.add(consumedFanoutResultKey);
-    scenarioState.subagentFanoutPhaseByNamespace.set(fanoutNamespace, 2);
+    scenarioState.subagentFanoutPhaseByNamespace.set(requestFanoutNamespace, 2);
     return buildAssistantEvents("subagent-1: ok\nsubagent-2: ok");
   }
   const successfulAlphaSpawn = hasSuccessfulSessionsSpawnToolResult(input, "qa-fanout-alpha");
@@ -1272,7 +1273,7 @@ async function buildResponsesPayload(
   ) {
     const worker = successfulAlphaSpawn ? "beta" : "alpha";
     if (successfulAlphaSpawn) {
-      scenarioState.subagentFanoutPhaseByNamespace.set(fanoutNamespace, 1);
+      scenarioState.subagentFanoutPhaseByNamespace.set(requestFanoutNamespace, 1);
     }
     const args = {
       task: subagentFanoutTaskForProvider(providerVariant, worker),

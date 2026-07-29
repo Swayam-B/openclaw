@@ -122,17 +122,19 @@ export function buildAssistantText(
   const completionCallKey = completionCallId
     ? buildMockScenarioStateCallKey(scenarioNamespace, completionCallId)
     : "";
-  const pendingImageCallKey =
-    (completionCallKey && scenarioState.pendingImageGenerationCalls.has(completionCallKey)
+  let pendingImageCallKey: string | undefined;
+  if (completionCallKey) {
+    pendingImageCallKey = scenarioState.pendingImageGenerationCalls.has(completionCallKey)
       ? completionCallKey
-      : undefined) ??
-    (completedImageEvent
-      ? [...scenarioState.pendingImageGenerationCalls.entries()].find(
-          ([, pending]) =>
-            pending.namespace === scenarioNamespace &&
-            pending.prompt === completedImageEvent.taskLabel,
-        )?.[0]
-      : undefined);
+      : undefined;
+  } else if (completedImageEvent) {
+    const matchingPendingCalls = [...scenarioState.pendingImageGenerationCalls.entries()].filter(
+      ([, pending]) =>
+        pending.namespace === scenarioNamespace && pending.prompt === completedImageEvent.taskLabel,
+    );
+    pendingImageCallKey =
+      matchingPendingCalls.length === 1 ? matchingPendingCalls[0]?.[0] : undefined;
+  }
   const hasPendingImageCall = Boolean(pendingImageCallKey);
   const trustedToolMediaPath = hasPendingImageCall ? mediaPath : "";
   const trustedCompletedImageMediaPath = hasPendingImageCall

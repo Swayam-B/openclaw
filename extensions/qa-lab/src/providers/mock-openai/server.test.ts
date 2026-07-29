@@ -3472,7 +3472,7 @@ describe("qa mock openai server", () => {
     });
     expect(outputText(await finalA.json())).toBe("subagent-1: ok\nsubagent-2: ok");
 
-    const finalB = await postResponses(server, {
+    const foreignBetaB = await postResponses(server, {
       stream: false,
       tools: [SESSIONS_SPAWN_TOOL],
       input: [
@@ -3491,6 +3491,19 @@ describe("qa mock openai server", () => {
           }),
         },
       ],
+    });
+    const foreignBetaBPayload = await foreignBetaB.json();
+    const betaB = outputToolCall(foreignBetaBPayload, "sessions_spawn");
+    expect(outputToolArgsFromItem(betaB).label).toBe("qa-fanout-beta");
+
+    const finalB = await postResponses(server, {
+      stream: false,
+      tools: [SESSIONS_SPAWN_TOOL],
+      input: completedSpawnInput(
+        promptFor("agent:qa:fanout:1:session-b"),
+        betaB,
+        "agent:qa:subagent:beta-b",
+      ),
     });
     expect(outputText(await finalB.json())).toBe("subagent-1: ok\nsubagent-2: ok");
 
@@ -4304,17 +4317,23 @@ describe("qa mock openai server", () => {
     );
   });
 
-  it("isolates pending image calls when sessions reuse a call id", async () => {
+  it("requires an exact session-owned image call id before consuming pending work", async () => {
     const server = await startMockServer();
     const prompt = "Image generation check: generate a QA lighthouse image.";
-    const imagePlan = await expectResponsesJson<unknown>(server, {
+    const imagePlanA = await expectResponsesJson<unknown>(server, {
       stream: false,
       prompt_cache_key: "image-session-a",
       tools: [IMAGE_GENERATE_TOOL],
       input: [makeUserInput(prompt)],
     });
-    const imageCall = outputToolCall(imagePlan, "image_generate");
-    const callId = outputToolCallId(imageCall, "call_mock_image_generate_collision");
+    const imageCallA = outputToolCall(imagePlanA, "image_generate");
+    const imagePlanB = await expectResponsesJson<unknown>(server, {
+      stream: false,
+      prompt_cache_key: "image-session-b",
+      tools: [IMAGE_GENERATE_TOOL],
+      input: [makeUserInput(prompt)],
+    });
+    const imageCallB = outputToolCall(imagePlanB, "image_generate");
     const completionEvent = (mediaPath: string) =>
       [
         "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>",
@@ -4328,35 +4347,73 @@ describe("qa mock openai server", () => {
         `MEDIA:${mediaPath}`,
         "<<<END_OPENCLAW_INTERNAL_CONTEXT>>>",
       ].join("\n");
-    const completionInput = (mediaPath: string) => [
+    const completionInput = (imageCall: Record<string, unknown>, mediaPath: string) => [
       makeUserInput(prompt),
       imageCall,
       {
         type: "function_call_output" as const,
-        call_id: callId,
+        call_id: outputToolCallId(imageCall, "missing-image-call-id"),
         output: JSON.stringify({
           content: [{ type: "text", text: "Background image generation started." }],
           details: { async: true, status: "started" },
         }),
       },
-      makeUserInput(completionEvent(mediaPath)),
+      {
+        role: "assistant" as const,
+        content: [{ type: "input_text" as const, text: completionEvent(mediaPath) }],
+      },
     ];
 
-    const collidingSession = await expectResponsesJson<unknown>(server, {
+    const foreignCallCompletion = await expectResponsesJson<unknown>(server, {
       stream: false,
       prompt_cache_key: "image-session-b",
       tools: [MESSAGE_TOOL],
-      input: completionInput("/tmp/session-b.png"),
+      input: completionInput(imageCallA, "/tmp/session-b-foreign.png"),
     });
-    expect(outputText(collidingSession)).not.toContain("MEDIA:/tmp/session-b.png");
+    expect(outputText(foreignCallCompletion)).not.toContain("MEDIA:/tmp/session-b-foreign.png");
 
     const owningSession = await expectResponsesJson<unknown>(server, {
       stream: false,
-      prompt_cache_key: "image-session-a",
+      prompt_cache_key: "image-session-b",
       tools: [MESSAGE_TOOL],
-      input: completionInput("/tmp/session-a.png"),
+      input: completionInput(imageCallB, "/tmp/session-b-owned.png"),
     });
-    expect(outputText(owningSession)).toContain("MEDIA:/tmp/session-a.png");
+    expect(outputText(owningSession)).toContain("MEDIA:/tmp/session-b-owned.png");
+  });
+
+  it("rejects an id-less image completion when the task label is ambiguous", async () => {
+    const server = await startMockServer();
+    const prompt = "Image generation check: generate a QA lighthouse image.";
+    const plan = async () =>
+      await expectResponsesJson<unknown>(server, {
+        stream: false,
+        prompt_cache_key: "image-session-ambiguous",
+        tools: [IMAGE_GENERATE_TOOL],
+        input: [makeUserInput(prompt)],
+      });
+    await plan();
+    await plan();
+
+    const completionEvent = [
+      "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>",
+      "OpenClaw runtime context (internal):",
+      "",
+      "[Internal task completion event]",
+      "source: image_generation",
+      "task: A QA lighthouse on a dark sea with a tiny protocol droid silhouette.",
+      "status: completed successfully",
+      "Generated media:",
+      "MEDIA:/tmp/ambiguous.png",
+      "<<<END_OPENCLAW_INTERNAL_CONTEXT>>>",
+    ].join("\n");
+    const completion = await expectResponsesJson<unknown>(server, {
+      stream: false,
+      prompt_cache_key: "image-session-ambiguous",
+      tools: [MESSAGE_TOOL],
+      input: [makeUserInput(prompt), makeUserInput(completionEvent)],
+    });
+
+    expect(outputText(completion)).not.toContain("MEDIA:/tmp/ambiguous.png");
   });
 
   it("does not replay a historical image completion on a new marker turn", async () => {
@@ -5656,7 +5713,7 @@ describe("qa mock openai server", () => {
       completedSpawn("agent:qa:subagent:alpha"),
     );
     const beta = requireExecSpawn(await send(afterAlpha), "qa-fanout-beta");
-    const betaCompletion = appendResult([], beta, completedSpawn("agent:qa:subagent:beta"));
+    const betaCompletion = appendResult(afterAlpha, beta, completedSpawn("agent:qa:subagent:beta"));
     const final = await send(betaCompletion);
     expect(final.stop_reason).toBe("end_turn");
     expect(final.content.find((block) => block.type === "text")?.text).toBe(
