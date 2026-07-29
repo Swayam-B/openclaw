@@ -6,6 +6,7 @@ import { resolveToolLoopDetectionConfig } from "../../agent-tools.js";
 import {
   CODE_MODE_EXEC_TOOL_NAME,
   CODE_MODE_WAIT_TOOL_NAME,
+  collectCodeModeDirectToolNames,
   createCodeModeTools,
 } from "../../code-mode.js";
 import { filterLocalModelLeanTools } from "../../local-model-lean.js";
@@ -140,6 +141,9 @@ export function prepareEmbeddedAttemptToolCatalog(input: {
     toolSearchControlsEnabledForRun &&
     toolSearchConfig.mode === "directory" &&
     toolSearch.catalogRegistered;
+  const codeModeDirectToolNames = codeModeControlsEnabledForRun
+    ? collectCodeModeDirectToolNames(preparedToolBase.toolSearchCatalogRef?.current?.entries ?? [])
+    : undefined;
   input.markStage("bundle-tools");
   const explicitToolAllowlistSources = collectAttemptExplicitToolAllowlistSources({
     capabilityProfile: runtimeCapabilityProfile,
@@ -185,6 +189,7 @@ export function prepareEmbeddedAttemptToolCatalog(input: {
 
   return {
     catalogToolHookContext,
+    codeModeDirectToolNames,
     deferredDirectoryToolsCallable,
     effectiveTools,
     emptyExplicitToolAllowlistError,

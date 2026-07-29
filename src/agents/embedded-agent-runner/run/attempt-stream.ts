@@ -41,6 +41,7 @@ import {
   wrapStreamFnSanitizeMalformedToolCalls,
   wrapStreamFnTrimToolCallNames,
 } from "./attempt.tool-call-normalization.js";
+import { wrapStreamFnTranslateCodeModeGuestToolCalls } from "./code-mode-tool-call-repair.js";
 import {
   resolveLlmFirstEventTimeoutMs,
   resolveLlmIdleTimeoutMs,
@@ -68,6 +69,7 @@ export function installEmbeddedAttemptStreamGuards(input: {
   isOpenAIResponsesApi: boolean;
   replayAllowedToolNames: Set<string>;
   liveAllowedToolNames: Set<string>;
+  codeModeDirectToolNames?: ReadonlySet<string>;
   isYieldDetected: () => boolean;
   clientToolLoopDetection: ReturnType<
     typeof import("../../agent-tools.js").resolveToolLoopDetectionConfig
@@ -210,6 +212,10 @@ export function installEmbeddedAttemptStreamGuards(input: {
   session.agent.streamFn = wrapStreamFnPromoteStandaloneTextToolCalls(
     session.agent.streamFn,
     input.liveAllowedToolNames,
+  );
+  session.agent.streamFn = wrapStreamFnTranslateCodeModeGuestToolCalls(
+    session.agent.streamFn,
+    input.codeModeDirectToolNames,
   );
   session.agent.streamFn = wrapStreamFnTrimToolCallNames(
     session.agent.streamFn,

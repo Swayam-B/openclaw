@@ -5,6 +5,8 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createLazyPromiseLoader } from "../shared/lazy-runtime.js";
 import { clampNumber } from "../utils.js";
 import { resolveAgentConfig } from "./agent-scope-config.js";
+import { autoReturnFinalGuestCall } from "./code-mode-auto-return.js";
+import { CODE_MODE_MODULE_ACCESS_ERROR } from "./code-mode-errors.js";
 import { toCodeModeJsonSafe } from "./code-mode-json.js";
 import type { CodeModeNamespaceRuntime } from "./code-mode-namespaces.js";
 import {
@@ -584,16 +586,16 @@ export async function prepareSource(input: {
   }
   if (language === "javascript") {
     if (rejectsModuleAccess(input.code)) {
-      throw new ToolInputError("code mode module access is disabled.");
+      throw new ToolInputError(CODE_MODE_MODULE_ACCESS_ERROR);
     }
     if (isShellLikeCodeModeSource(input.code)) {
       throw new ToolInputError(CODE_MODE_SHELL_SOURCE_ERROR);
     }
-    return input.code;
+    return autoReturnFinalGuestCall(input.code);
   }
   const ts = await loadTypeScriptRuntime();
   if (rejectsModuleAccess(input.code, ts)) {
-    throw new ToolInputError("code mode module access is disabled.");
+    throw new ToolInputError(CODE_MODE_MODULE_ACCESS_ERROR);
   }
   const transformed = ts.transpileModule(input.code, {
     compilerOptions: {
@@ -612,7 +614,7 @@ export async function prepareSource(input: {
     throw new ToolInputError(`typescript transform failed: ${message}`);
   }
   if (rejectsModuleAccess(transformed.outputText, ts)) {
-    throw new ToolInputError("code mode module access is disabled.");
+    throw new ToolInputError(CODE_MODE_MODULE_ACCESS_ERROR);
   }
   if (
     isShellLikeCodeModeSource(input.code, transformed.outputText) ||
@@ -620,7 +622,7 @@ export async function prepareSource(input: {
   ) {
     throw new ToolInputError(CODE_MODE_SHELL_SOURCE_ERROR);
   }
-  return transformed.outputText;
+  return autoReturnFinalGuestCall(transformed.outputText);
 }
 
 export function errorMessage(error: unknown): string {

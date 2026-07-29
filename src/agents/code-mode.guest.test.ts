@@ -269,6 +269,32 @@ describe("Code Mode guest execution", () => {
     expect(ticket.execute).toHaveBeenCalledTimes(3);
   });
 
+  it("returns a trailing direct guest tool call without an explicit return", async () => {
+    const { config, catalogRef, tools: codeModeTools } = createCodeModeHarness();
+    const ticket = pluginTool("fake_create_ticket", "Create a fake ticket");
+    applyCodeModeCatalog({
+      tools: [...codeModeTools, ticket],
+      config,
+      sessionId: "session-code-mode",
+      sessionKey: "agent:main:main",
+      runId: "run-code-mode",
+      catalogRef,
+    });
+
+    const details = await runUntilCompleted({
+      execTool: expectDefined(codeModeTools[0], "codeModeTools[0] test invariant"),
+      waitTool: expectDefined(codeModeTools[1], "codeModeTools[1] test invariant"),
+      code: 'await tools.fake_create_ticket({ value: "ship" });',
+    });
+
+    expect(details.status).toBe("completed");
+    expect(details.value).toEqual({
+      name: "fake_create_ticket",
+      input: { value: "ship" },
+    });
+    expect(ticket.execute).toHaveBeenCalledTimes(1);
+  });
+
   it("uses tools recovery guidance for guessed tool ids", async () => {
     const { config, catalogRef, tools: codeModeTools } = createCodeModeHarness();
     const writeTool = pluginTool("write", "Write a file to the workspace");

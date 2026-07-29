@@ -238,6 +238,58 @@ describe("Code Mode guest source validation", () => {
   });
 
   it.each([
+    "await tools.read({ path: 'facts.txt' });",
+    "tools.read({ path: 'facts.txt' });",
+    "await MCP.files.read({ path: 'facts.txt' });",
+  ])("returns a final guest API call automatically: %s", async (code) => {
+    await expect(prepareSource({ code, config })).resolves.toBe(`return ${code}`);
+  });
+
+  it.each(["tools;", "tools.read;", "await tools.read;"])(
+    "does not return a bare guest reference: %s",
+    async (code) => {
+      await expect(prepareSource({ code, config })).resolves.toBe(code);
+    },
+  );
+
+  it.each([
+    "const tools = { read: () => 'local' };\ntools.read();",
+    "tools = { read: () => 'local' };\ntools.read();",
+    "({ tools } = { tools: { read: () => 'local' } });\ntools.read();",
+    "function tools() { return 'local'; }\ntools();",
+  ])("does not return a call through a shadowed guest root: %s", async (code) => {
+    await expect(prepareSource({ code, config })).resolves.toBe(code);
+  });
+
+  it.each([
+    "typeof tools;\nawait tools.read({ path: 'facts.txt' });",
+    "function inspect(tools) { return tools; }\nawait tools.read({ path: 'facts.txt' });",
+    "{ const tools = { read: () => 'local' }; tools.read(); }\nawait tools.read({ path: 'facts.txt' });",
+  ])("returns a guest call after unrelated read-only or nested bindings: %s", async (code) => {
+    const finalLine = code.slice(code.lastIndexOf("\n") + 1);
+    await expect(prepareSource({ code, config })).resolves.toBe(
+      `${code.slice(0, code.length - finalLine.length)}return ${finalLine}`,
+    );
+  });
+
+  it("returns only the final top-level guest call", async () => {
+    const code = "const path = 'facts.txt';\nawait tools.read({ path });";
+    await expect(prepareSource({ code, config })).resolves.toBe(
+      "const path = 'facts.txt';\nreturn await tools.read({ path });",
+    );
+  });
+
+  it("returns a final TypeScript guest call after transpilation", async () => {
+    const source = await prepareSource({
+      code: "const path: string = 'facts.txt';\nawait tools.read({ path });",
+      language: "typescript",
+      config,
+    });
+    expect(source).toContain("const path = 'facts.txt';");
+    expect(source).toContain("return await tools.read({ path });");
+  });
+
+  it.each([
     {
       name: "direct require",
       code: "return require('node:fs');",
@@ -377,6 +429,12 @@ describe("Code Mode guest source validation", () => {
   ])("rejects $name", async ({ code }) => {
     await expect(prepareSource({ code, config })).rejects.toThrow(
       "code mode module access is disabled",
+    );
+  });
+
+  it("guides module-access failures toward guest tools", async () => {
+    await expect(prepareSource({ code: "require('node:fs');", config })).rejects.toThrow(
+      "return await tools.read",
     );
   });
 
