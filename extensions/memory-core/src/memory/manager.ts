@@ -1112,6 +1112,9 @@ export class MemoryIndexManager extends MemoryManagerEmbeddingOps implements Mem
   }
 
   async search(query: string, opts?: MemoryIndexSearchOptions): Promise<MemorySearchResult[]> {
+    if (!query.trim()) {
+      return [];
+    }
     const maxResults = opts?.maxResults ?? this.settings.query.maxResults;
     const minScore = opts?.minScore ?? this.settings.query.minScore;
     const hasActiveProject = (opts?.activeProjectKeys?.length ?? 0) > 0;
