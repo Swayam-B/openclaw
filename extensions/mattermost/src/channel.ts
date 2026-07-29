@@ -68,6 +68,7 @@ import {
   resolveMattermostReplyToMode,
   type ResolvedMattermostAccount,
 } from "./mattermost/accounts.js";
+import type { MattermostSendResult } from "./mattermost/send.js";
 import { looksLikeMattermostTargetId, normalizeMattermostMessagingTarget } from "./normalize.js";
 import { collectRuntimeConfigAssignments, secretTargetRegistryEntries } from "./secret-contract.js";
 import { resolveMattermostOutboundSessionRoute } from "./session-route.js";
@@ -760,6 +761,18 @@ function resolveMattermostSendAttachmentMedia(params: Record<string, unknown>): 
   return attachmentMedia.mediaUrls[0];
 }
 
+type MattermostOutboundContext = Parameters<NonNullable<ChannelOutboundAdapter["sendText"]>>[0];
+
+function createMattermostDeliveryProgressReporter(
+  onDeliveryResult: MattermostOutboundContext["onDeliveryResult"],
+) {
+  return onDeliveryResult
+    ? async (result: MattermostSendResult) => {
+        await onDeliveryResult(attachChannelToResult("mattermost", result));
+      }
+    : undefined;
+}
+
 const mattermostOutbound: ChannelOutboundAdapter = {
   deliveryMode: "direct",
   chunker: chunkTextForOutbound,
@@ -826,6 +839,7 @@ const mattermostOutbound: ChannelOutboundAdapter = {
         replyToId: ctx.replyToId ?? (ctx.threadId != null ? String(ctx.threadId) : undefined),
         buttons: buttons?.length ? buttons : undefined,
         attachmentText,
+        onDeliveryResult: createMattermostDeliveryProgressReporter(ctx.onDeliveryResult),
       });
       return attachChannelToResult("mattermost", result);
     }
@@ -845,13 +859,14 @@ const mattermostOutbound: ChannelOutboundAdapter = {
   },
   ...createAttachedChannelResultAdapter({
     channel: "mattermost",
-    sendText: async ({ cfg, to, text, accountId, replyToId, threadId }) =>
+    sendText: async ({ cfg, to, text, accountId, replyToId, threadId, onDeliveryResult }) =>
       await (
         await loadMattermostChannelRuntime()
       ).sendMessageMattermost(to, text, {
         cfg,
         accountId: accountId ?? undefined,
         replyToId: replyToId ?? (threadId != null ? String(threadId) : undefined),
+        onDeliveryResult: createMattermostDeliveryProgressReporter(onDeliveryResult),
       }),
     sendMedia: async ({
       cfg,
@@ -864,6 +879,7 @@ const mattermostOutbound: ChannelOutboundAdapter = {
       accountId,
       replyToId,
       threadId,
+      onDeliveryResult,
     }) =>
       await (
         await loadMattermostChannelRuntime()
@@ -876,6 +892,7 @@ const mattermostOutbound: ChannelOutboundAdapter = {
         ...(mediaAccess?.workspaceDir ? { workspaceDir: mediaAccess.workspaceDir } : {}),
         requireMediaUpload: requiresMattermostMediaUpload(mediaUrl) ? true : undefined,
         replyToId: replyToId ?? (threadId != null ? String(threadId) : undefined),
+        onDeliveryResult: createMattermostDeliveryProgressReporter(onDeliveryResult),
       }),
   }),
 };

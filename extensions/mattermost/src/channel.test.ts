@@ -1628,6 +1628,72 @@ describe("mattermostPlugin", () => {
   });
 
   describe("outbound", () => {
+    it.each([
+      {
+        name: "text",
+        send: async (onDeliveryResult: MattermostSendTextParams["onDeliveryResult"]) =>
+          await requireMattermostSendText()({
+            cfg: createMattermostTestConfig(),
+            to: "channel:CHAN1",
+            text: "provider-final",
+            onDeliveryResult,
+          }),
+      },
+      {
+        name: "media",
+        send: async (onDeliveryResult: MattermostSendMediaParams["onDeliveryResult"]) =>
+          await requireMattermostSendMedia()({
+            cfg: createMattermostTestConfig(),
+            to: "channel:CHAN1",
+            text: "provider-final",
+            mediaUrl: "https://example.com/report.png",
+            onDeliveryResult,
+          }),
+      },
+      {
+        name: "payload",
+        send: async (onDeliveryResult: MattermostSendTextParams["onDeliveryResult"]) =>
+          await requireMattermostSendPayload()({
+            cfg: createMattermostTestConfig(),
+            to: "channel:CHAN1",
+            text: "provider-final",
+            payload: {
+              text: "provider-final",
+              channelData: {
+                mattermost: {
+                  attachmentText: "attachment",
+                },
+              },
+            },
+            onDeliveryResult,
+          }),
+      },
+    ])("reports $name provider progress before a later bookkeeping failure", async ({ send }) => {
+      const onDeliveryResult = vi.fn();
+      sendMessageMattermostMock.mockImplementationOnce(
+        async (_to: string, _text: string, options: Record<string, unknown>) => {
+          const report = options.onDeliveryResult as
+            | ((result: Record<string, unknown>) => Promise<void>)
+            | undefined;
+          await report?.({
+            messageId: "post-final",
+            channelId: "CHAN1",
+            content: "provider-final",
+          });
+          throw new Error("activity store unavailable");
+        },
+      );
+
+      await expect(send(onDeliveryResult)).rejects.toThrow("activity store unavailable");
+      expect(onDeliveryResult).toHaveBeenCalledTimes(1);
+      expect(onDeliveryResult).toHaveBeenCalledWith({
+        channel: "mattermost",
+        messageId: "post-final",
+        channelId: "CHAN1",
+        content: "provider-final",
+      });
+    });
+
     it("renders presentation buttons for normal reply payload delivery", async () => {
       const renderPresentation = requireMattermostRenderPresentation();
       const sendPayload = requireMattermostSendPayload();

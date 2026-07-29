@@ -325,17 +325,25 @@ describe("sendMessageMattermost", () => {
   });
 
   it("preserves the provider post when outbound bookkeeping fails afterward", async () => {
+    const events: string[] = [];
+    const onDeliveryResult = vi.fn(() => {
+      events.push("delivery");
+    });
     mockState.createMattermostPost.mockResolvedValueOnce({
       id: "post-final",
       message: "provider-final",
     });
     mockState.recordActivity.mockImplementationOnce(() => {
+      events.push("activity");
       throw new Error("activity store unavailable");
     });
 
     let caught: unknown;
     try {
-      await sendMessageMattermost("channel:town-square", "requested text", { cfg: TEST_CFG });
+      await sendMessageMattermost("channel:town-square", "requested text", {
+        cfg: TEST_CFG,
+        onDeliveryResult,
+      });
     } catch (error: unknown) {
       caught = error;
     }
@@ -349,6 +357,15 @@ describe("sendMessageMattermost", () => {
       visibleReplySent: true,
       content: "provider-final",
     });
+    expect(onDeliveryResult).toHaveBeenCalledTimes(1);
+    expect(onDeliveryResult).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: "post-final",
+        channelId: "town-square",
+        content: "provider-final",
+      }),
+    );
+    expect(events).toStrictEqual(["delivery", "activity"]);
   });
 
   it("loads outbound media with trusted local roots before upload", async () => {

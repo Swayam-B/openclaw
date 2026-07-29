@@ -61,6 +61,8 @@ type MattermostSendOpts = {
   dmRetryOptions?: CreateDmChannelRetryOptions;
   /** Observe the bounded cache-miss DM channel resolution lifecycle. */
   onDmChannelResolution?: (resolution: PromiseLike<unknown>) => void;
+  /** Report the provider-finalized send before later fallible bookkeeping. */
+  onDeliveryResult?: (result: MattermostSendResult) => Promise<void> | void;
 };
 
 export type MattermostSendResult = {
@@ -511,6 +513,9 @@ export async function sendMessageMattermost(
     receipt,
     content: post.message ?? message,
   };
+  // Core must learn the provider identity before local bookkeeping can fail;
+  // otherwise a retry can duplicate an already-visible post.
+  await opts.onDeliveryResult?.(result);
   try {
     recordMattermostOutboundActivity(accountId);
   } catch (error: unknown) {
