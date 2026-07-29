@@ -1,6 +1,7 @@
 /* @vitest-environment jsdom */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { GatewayBrowserClient } from "../api/gateway.ts";
 import { createStorageMock } from "../test-helpers/storage.ts";
 import {
   applyServerUiPrefs,
@@ -24,6 +25,45 @@ afterEach(() => {
 
 function configWithPrefs(prefs: Record<string, unknown>) {
   return { ui: { prefs } };
+}
+
+type RequestMock = ReturnType<typeof vi.fn<(method: string, params?: unknown) => Promise<unknown>>>;
+
+function createServerPrefsWriter(
+  request: RequestMock,
+  gatewayUrl = "ws://gw",
+  connected = true,
+): Parameters<typeof pushServerUiPrefs>[0] {
+  const client = { request, gatewayUrl, connected } as unknown as GatewayBrowserClient;
+  const writer = {
+    state: { client, connected },
+    runExternalMutation: async <T>(task: (client: GatewayBrowserClient) => Promise<T>) => {
+      if (!writer.state.connected) {
+        return {
+          ok: false as const,
+          reason: "unavailable" as const,
+          error: "offline",
+        };
+      }
+      try {
+        return {
+          ok: true as const,
+          value: await task(client),
+          refresh: { ok: true as const },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          ok: false as const,
+          reason: message.includes("config changed since last load")
+            ? ("conflict" as const)
+            : ("error" as const),
+          error: message,
+        };
+      }
+    },
+  };
+  return writer;
 }
 
 describe("server pref extraction", () => {
@@ -93,9 +133,7 @@ describe("applyServerUiPrefs", () => {
     applyServerUiPrefs(oldSnapshot, { scope, onApplied });
     patchSettings({ themeMode: "dark" });
     const request = vi.fn(async () => ({}));
-    const client = { connected: true, gatewayUrl: scope, request } as unknown as Parameters<
-      typeof pushServerUiPrefs
-    >[0];
+    const client = createServerPrefsWriter(request, scope);
 
     pushServerUiPrefs(client, { themeMode: "dark" });
     await vi.waitFor(() =>
@@ -113,9 +151,7 @@ describe("applyServerUiPrefs", () => {
     applyServerUiPrefs(oldSnapshot, { scope, onApplied });
     patchSettings({ themeMode: "dark" });
     const request = vi.fn(async () => ({}));
-    const client = { connected: true, gatewayUrl: scope, request } as unknown as Parameters<
-      typeof pushServerUiPrefs
-    >[0];
+    const client = createServerPrefsWriter(request, scope);
     pushServerUiPrefs(client, { themeMode: "dark" });
     await vi.waitFor(() =>
       expect(localStorage.getItem(`openclaw.control.serverPrefs.pending.v1:${scope}`)).toBeNull(),
@@ -272,9 +308,6 @@ describe("clearable pref removal from the server", () => {
 });
 
 describe("pushServerUiPrefs", () => {
-  type RequestMock = ReturnType<
-    typeof vi.fn<(method: string, params?: unknown) => Promise<unknown>>
-  >;
   const deferred = () => {
     let resolve!: (value: unknown) => void;
     let reject!: (reason?: unknown) => void;
@@ -288,8 +321,7 @@ describe("pushServerUiPrefs", () => {
   const lastSeenKey = (scope: string) => `openclaw.control.serverPrefs.v1:${scope}`;
   const readPending = (scope: string) =>
     JSON.parse(localStorage.getItem(pendingKey(scope)) ?? "{}") as Record<string, unknown>;
-  const createClient = (request: RequestMock, gatewayUrl = "ws://gw", connected = true) =>
-    ({ request, gatewayUrl, connected }) as unknown as Parameters<typeof pushServerUiPrefs>[0];
+  const createClient = createServerPrefsWriter;
 
   it("sends one hash-free patch and acknowledges lastSeen plus pending", async () => {
     const request = vi.fn<(method: string, params?: unknown) => Promise<unknown>>(async () => ({}));
@@ -401,20 +433,19 @@ describe("pushServerUiPrefs", () => {
     const request = vi.fn<(method: string, params?: unknown) => Promise<unknown>>(async () => {
       throw new Error("socket closed");
     });
-    const clientState = { request, gatewayUrl: "ws://gw", connected: false };
-    const client = clientState as unknown as Parameters<typeof pushServerUiPrefs>[0];
+    const client = createClient(request, "ws://gw", false);
 
     pushServerUiPrefs(client, { locale: "de" });
-    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    expect(request).not.toHaveBeenCalled();
     expect(JSON.parse(localStorage.getItem(pendingKey("ws://gw")) ?? "{}")).toEqual({
       locale: "de",
     });
 
-    clientState.connected = true;
+    (client.state as { connected: boolean }).connected = true;
     request.mockResolvedValue({});
     flushServerUiPrefs(client);
-    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
-    expect(localStorage.getItem(pendingKey("ws://gw"))).toBeNull();
+    await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(localStorage.getItem(pendingKey("ws://gw"))).toBeNull());
   });
 
   it("supersedes a hung prior-connection request on same-client flush", async () => {
@@ -455,7 +486,7 @@ describe("pushServerUiPrefs", () => {
     await vi.waitFor(() => expect(localStorage.getItem(pendingKey("ws://gw"))).toBeNull());
   });
 
-  it("keeps pending shadow active during the post-commit refresh hook", async () => {
+  it("runs the post-commit refresh hook after clearing the pending shadow", async () => {
     const request = vi.fn<(method: string, params?: unknown) => Promise<unknown>>(async () => ({}));
     const client = createClient(request);
     patchSettings({ themeMode: "dark" });
@@ -476,8 +507,8 @@ describe("pushServerUiPrefs", () => {
     await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(localStorage.getItem(pendingKey("ws://gw"))).toBeNull());
 
-    expect(onApplied).not.toHaveBeenCalled();
-    expect(loadSettings().themeMode).toBe("dark");
+    expect(onApplied).toHaveBeenCalledWith({ themeMode: "light" });
+    expect(loadSettings().themeMode).toBe("light");
   });
 
   it("lets pending local intent shadow only its own server key", async () => {
@@ -649,9 +680,9 @@ describe("pushServerUiPrefs", () => {
       },
     );
     pushServerUiPrefs(createClient(offlineRequest, "ws://a", false), { themeMode: "dark" });
-    await vi.waitFor(() => expect(offlineRequest).toHaveBeenCalledTimes(1));
+    expect(offlineRequest).not.toHaveBeenCalled();
     pushServerUiPrefs(createClient(offlineRequest, "ws://b", false), { locale: "de" });
-    await vi.waitFor(() => expect(offlineRequest).toHaveBeenCalledTimes(2));
+    expect(offlineRequest).not.toHaveBeenCalled();
 
     expect(JSON.parse(localStorage.getItem(pendingKey("ws://a")) ?? "{}")).toEqual({
       themeMode: "dark",
@@ -670,5 +701,40 @@ describe("pushServerUiPrefs", () => {
       raw: JSON.stringify({ ui: { prefs: { locale: "de" } } }),
     });
     expect(localStorage.getItem(pendingKey("ws://a"))).not.toBeNull();
+  });
+
+  it("re-adopts scope when a stable writer gains or changes its gateway client", async () => {
+    const request = vi.fn<(method: string, params?: unknown) => Promise<unknown>>(async () => ({}));
+    const writer = createClient(request, "", false);
+    (writer.state as { client: GatewayBrowserClient | null }).client = null;
+
+    pushServerUiPrefs(writer, { locale: "de" });
+    expect(JSON.parse(localStorage.getItem(pendingKey("")) ?? "{}")).toEqual({ locale: "de" });
+
+    const firstClient = {
+      request,
+      gatewayUrl: "ws://first",
+      connected: true,
+    } as unknown as GatewayBrowserClient;
+    (writer.state as { client: GatewayBrowserClient | null; connected: boolean }).client =
+      firstClient;
+    (writer.state as { connected: boolean }).connected = true;
+    flushServerUiPrefs(writer);
+    await vi.waitFor(() => expect(localStorage.getItem(pendingKey("ws://first"))).toBeNull());
+    expect(localStorage.getItem(pendingKey(""))).toBeNull();
+
+    localStorage.setItem(pendingKey("ws://second"), JSON.stringify({ themeMode: "dark" }));
+    const secondClient = {
+      request,
+      gatewayUrl: "ws://second",
+      connected: true,
+    } as unknown as GatewayBrowserClient;
+    (writer.state as { client: GatewayBrowserClient | null }).client = secondClient;
+    flushServerUiPrefs(writer);
+
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(request.mock.calls[1]?.[1]).toMatchObject({
+      raw: JSON.stringify({ ui: { prefs: { themeMode: "dark" } } }),
+    });
   });
 });
